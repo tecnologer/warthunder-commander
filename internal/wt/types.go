@@ -1,0 +1,137 @@
+package wt
+
+import (
+	"fmt"
+	"math"
+	"strings"
+
+	"github.com/tecnologer/warthunder/internal/config"
+)
+
+// GameMode identifies the battle ruleset.
+type GameMode int
+
+const (
+	// GameModeArcade is the default; all alerts active.
+	GameModeArcade GameMode = iota
+	// GameModeRealistic only show enemies spotted by a nearby ally (< 0.20 units).
+	GameModeRealistic
+	// GameModeSimulator all enemy-position alerts are disabled.
+	GameModeSimulator
+)
+
+// ParseGameMode converts an API string to a GameMode.
+// Unrecognised values return GameModeArcade.
+func ParseGameMode(s string) GameMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "realistic", "rb", "realistic_battle":
+		return GameModeRealistic
+	case "simulator", "sim", "sb", "simulator_battle":
+		return GameModeSimulator
+	default:
+		return GameModeArcade
+	}
+}
+
+// Team identifies which side an object belongs to.
+type Team int
+
+const (
+	TeamUnknown Team = iota
+	TeamPlayer
+	TeamAlly
+	TeamEnemy
+	TeamSquad
+)
+
+// MapObject represents a single entry from /map_obj.json.
+type MapObject struct {
+	Type   string    `json:"type"`
+	Color  string    `json:"color"`
+	ColorR []float64 `json:"color[]"`
+	Blink  int       `json:"blink"`
+	Icon   string    `json:"icon"`
+	IconBg string    `json:"icon_bg"`
+	X      float64   `json:"x"`
+	Y      float64   `json:"y"`
+	DX     float64   `json:"dx"`
+	DY     float64   `json:"dy"`
+}
+
+// MapInfo represents /map_info.json metadata.
+type MapInfo struct {
+	MapName       string  `json:"map_name"`
+	MapSizeX      float64 `json:"map_size_x"`
+	MapSizeY      float64 `json:"map_size_y"`
+	MapGeneration int     `json:"map_generation"`
+}
+
+// teamColors holds the active color configuration; set via SetColors.
+//
+//nolint:gochecknoglobals // intentional package-level state updated by SetColors
+var teamColors = config.ColorsConfig{
+	Tolerance: 30,
+	Player:    config.RGBColor{R: 250, G: 200, B: 30},
+	Ally:      config.RGBColor{R: 23, G: 77, B: 255},
+	Enemy:     config.RGBColor{R: 250, G: 12, B: 0},
+	Squad:     config.RGBColor{R: 103, G: 215, B: 86},
+}
+
+// SetColors replaces the color thresholds used for team identification.
+func SetColors(c config.ColorsConfig) { teamColors = c }
+
+// Team derives the team from the object's color array.
+func (o *MapObject) Team() Team {
+	if len(o.ColorR) < 3 {
+		return TeamUnknown
+	}
+
+	red, green, blue := o.ColorR[0], o.ColorR[1], o.ColorR[2]
+	tol := teamColors.Tolerance
+
+	switch {
+	case colorClose(red, green, blue, teamColors.Player.R, teamColors.Player.G, teamColors.Player.B, tol):
+		return TeamPlayer
+	case colorClose(red, green, blue, teamColors.Ally.R, teamColors.Ally.G, teamColors.Ally.B, tol):
+		return TeamAlly
+	case colorClose(red, green, blue, teamColors.Enemy.R, teamColors.Enemy.G, teamColors.Enemy.B, tol):
+		return TeamEnemy
+	case colorClose(red, green, blue, teamColors.Squad.R, teamColors.Squad.G, teamColors.Squad.B, tol):
+		return TeamSquad
+	default:
+		return TeamUnknown
+	}
+}
+
+// IsEnemy returns true when the object belongs to the enemy team.
+// Respawn bases share the enemy team color but are map objects, not combatants.
+func (o *MapObject) IsEnemy() bool {
+	return o.Team() == TeamEnemy &&
+		o.Icon != "respawn_base_tank" &&
+		o.Icon != "respawn_base_fighter" &&
+		o.Icon != "capture_zone"
+}
+
+// IsPlayer returns true when this object is the local player.
+func (o *MapObject) IsPlayer() bool { return o.Team() == TeamPlayer && o.Icon == "Player" }
+
+// IsCaptureZone returns true for capture zone objects.
+func (o *MapObject) IsCaptureZone() bool { return o.Icon == "capture_zone" }
+
+// PosKey returns a compact string key for deduplication across frames.
+func (o *MapObject) PosKey() string {
+	return fmt.Sprintf("%.4f:%.4f:%s", o.X, o.Y, o.Icon)
+}
+
+// Dist returns the normalized Euclidean distance between two objects.
+func Dist(a, b *MapObject) float64 {
+	dx := a.X - b.X
+	dy := a.Y - b.Y
+
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
+// colorClose checks whether RGB values are within the given tolerance.
+func colorClose(r, g, b, tr, tg, tb, tol float64) bool {
+	return math.Abs(r-tr) < tol && math.Abs(g-tg) < tol && math.Abs(b-tb) < tol
+}
