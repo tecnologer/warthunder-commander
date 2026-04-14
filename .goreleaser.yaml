@@ -1,0 +1,46 @@
+version: 2
+
+project_name: warthunder-commander
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: warthunder-commander
+    main: ./cmd/main.go
+    binary: warthunder-commander
+    env:
+      - CGO_ENABLED=0
+      - VERSION={{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}dev{{ end }}
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Env.VERSION }}
+
+archives:
+  - id: warthunder-commander
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch

@@ -1,0 +1,83 @@
+# War Thunder assistant configuration
+# All values shown are the defaults. Omit any field to keep the default.
+
+# UI language for alerts, commander voice, and LLM responses.
+# Valid values: "es" (Spanish, default), "en" (English).
+ language = "en"
+
+[ai]
+# AI backend to use for tactical reports.
+# Valid values: "groq" (default), "anthropic".
+engine = "groq"
+
+# Environment variable that holds the Groq API key.
+groq_env = "GROQ_API_KEY"
+
+# The assistant's callsign. This is used to refer to the assistant in conversations.
+callsign = "White Horse"
+
+# Environment variable that holds the Anthropic API key.
+anthropic_env = "ANTHROPIC_API_KEY"
+
+[colors]
+# RGB tolerance: how far each channel can be from the reference value
+# before the color is no longer matched to that team.
+tolerance = 30
+
+[colors.player]
+r = 250
+g = 200
+b = 30
+
+[colors.ally]
+r = 23
+g = 77
+b = 255
+
+[colors.enemy]
+r = 250
+g = 12
+b = 0
+
+[colors.squad]
+r = 103
+g = 215
+b = 86
+
+[tts]
+# TTS engine to use. Valid values: "google-tts", "kokoro", "camb".
+# Omit or leave blank to use "google-tts" (no API key required).
+ engine = "kokoro"
+
+# Playback volume as a percentage (0–200, default 100).
+# Values above 100 amplify beyond the original recording level.
+volume = 150
+
+# --- Kokoro settings (engine = "kokoro") ---
+# Environment variable that holds the Kokoro API key.
+# api_key_env = "KOKORO_API_KEY"
+
+# Base URL of the Kokoro HTTP API (OpenAI-compatible /v1/audio/speech endpoint).
+ base_url = "http://localhost:8880"
+
+# Voice identifier. Kokoro voices encode accent and gender in the prefix:
+#   af_ = American Female  am_ = American Male
+#   bf_ = British Female   bm_ = British Male
+# Examples: af_sky, af_bella, am_adam, bf_emma, bm_daniel
+ voice = "bm_lewis"
+
+# Model name passed to the Kokoro API.
+ model = "kokoro"
+
+# --- CAMB.AI settings (engine = "camb") ---
+# Environment variable that holds the CAMB.AI API key. Default: "CAMB_API_KEY".
+# api_key_env = "CAMB_API_KEY"
+
+# Numeric CAMB.AI voice ID. Run `warthunder --list-voices` to see available voices.
+#voice = "165304"  # Cristian Correa
+
+# Language for CAMB.AI synthesis, e.g. "english", "spanish". Default: "spanish".
+#    language = "es-mx"  # Mexican Spanish
+  # or:
+  # language = "es-es"   # Spain Spanish
+    language = "en-us"  # US English
