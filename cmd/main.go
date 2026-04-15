@@ -14,6 +14,7 @@ import (
 	"github.com/tecnologer/warthunder/internal/commander"
 	"github.com/tecnologer/warthunder/internal/config"
 	"github.com/tecnologer/warthunder/internal/lang"
+	"github.com/tecnologer/warthunder/internal/matchlog"
 	"github.com/tecnologer/warthunder/internal/tts"
 	"github.com/tecnologer/warthunder/internal/tts/camb"
 	"github.com/tecnologer/warthunder/internal/wt"
@@ -24,10 +25,8 @@ import (
 var version = "dev"
 
 const (
-	pollInterval      = 500 * time.Millisecond
-	alertCooldown     = 4 * time.Second
-	commanderInterval = 30 * time.Second
-	minConfirmFrames  = 6 // 3 s at 500 ms — avoids reacting to transient loading states
+	alertCooldown    = 4 * time.Second
+	minConfirmFrames = 6 // 3 s at 500 ms — avoids reacting to transient loading states
 )
 
 func main() {
@@ -40,8 +39,14 @@ func main() {
 		Name:    "warthunder",
 		Usage:   "War Thunder combat assistant",
 		Version: version,
-		Action: func(_ *cli.Context) error {
-			return runAssistant(cfg)
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "write raw WT API responses to a JSONL file on every poll",
+			},
+		},
+		Action: func(cliCtx *cli.Context) error {
+			return runAssistant(cfg, cliCtx.Bool("debug"))
 		},
 		Commands: []*cli.Command{
 			cambCommand(cfg),
@@ -153,14 +158,15 @@ func notifyMatchEnded(inMatch bool, resetFn func()) {
 	}
 }
 
-// dispatchAlert fires a TTS alert if one is ready and the cooldown has elapsed.
-// Returns the updated lastAlert time.
-func dispatchAlert(alert *analyzer.Alert, lastAlert time.Time, speak func(string)) time.Time {
-	if alert == nil || time.Since(lastAlert) < alertCooldown {
+// dispatchAlert fires a TTS alert if one is ready, passes the priority filter,
+// and the cooldown has elapsed. Returns the updated lastAlert time.
+func dispatchAlert(alert *analyzer.Alert, lastAlert time.Time, minPriority int, logger *matchlog.Logger, speak func(string)) time.Time {
+	if alert == nil || alert.Priority < minPriority || time.Since(lastAlert) < alertCooldown {
 		return lastAlert
 	}
 
 	log.Printf("[priority %d] %s", alert.Priority, alert.Message)
+	logger.Alert(alert.Priority, alert.Message)
 
 	go speak(alert.Message)
 
@@ -173,6 +179,7 @@ func invokeCommander(
 	cmd *commander.Commander,
 	col *collector.Collector,
 	client *wt.Client,
+	logger *matchlog.Logger,
 	speak func(string),
 	oldCancel context.CancelFunc,
 ) context.CancelFunc {
@@ -183,7 +190,15 @@ func invokeCommander(
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func(ctx context.Context, sum *collector.Summary, info *wt.MapInfo) {
-		report, err := cmd.Advise(ctx, sum, info)
+		report, prompt, err := cmd.Advise(ctx, sum, info)
+
+		response := ""
+		if report != nil {
+			response = report.Message
+		}
+
+		logger.CommanderPrompt(prompt, response)
+
 		if err != nil {
 			if !errors.Is(err, commander.ErrNoReport) && ctx.Err() == nil {
 				log.Printf("[commander] error: %v", err)
@@ -203,41 +218,74 @@ func invokeCommander(
 
 // assistantState holds all mutable state for the polling loop.
 type assistantState struct {
-	client        *wt.Client
-	alerter       *analyzer.Analyzer
-	col           *collector.Collector
-	cmd           *commander.Commander
-	language      lang.Language
-	inMatch       bool
-	confirmFrames int
-	cmdCancel     context.CancelFunc
-	lastAlert     time.Time
-	lastCommand   time.Time
+	client            *wt.Client
+	alerter           *analyzer.Analyzer
+	col               *collector.Collector
+	cmd               *commander.Commander
+	language          lang.Language
+	notifications     config.NotificationsConfig
+	commanderInterval time.Duration
+	logDir            string
+	logger            *matchlog.Logger
+	inMatch           bool
+	confirmFrames     int
+	matchMap          string
+	matchMode         wt.GameMode
+	cmdCancel         context.CancelFunc
+	lastAlert         time.Time
+	lastCommand       time.Time
 }
 
 func newAssistantState(cfg config.Config) *assistantState {
 	language := lang.Parse(cfg.Language)
+	cmdInterval := cfg.CommanderInterval
 
 	return &assistantState{
-		client:    wt.NewClient(),
-		alerter:   analyzer.New(language),
-		col:       collector.New(commanderInterval),
-		cmd:       commander.New(cfg.AI, language),
-		language:  language,
-		cmdCancel: func() {},
+		client:            wt.NewClient(cfg.WTSource),
+		alerter:           analyzer.New(language),
+		col:               collector.New(cmdInterval),
+		cmd:               commander.New(cfg.AI, language, cmdInterval),
+		language:          language,
+		notifications:     cfg.Notifications,
+		commanderInterval: cmdInterval,
+		logDir:            cfg.LogDir,
+		cmdCancel:         func() {},
 	}
 }
 
 func (s *assistantState) reset() {
 	s.inMatch = false
 	s.confirmFrames = 0
+	s.matchMap = ""
+	s.matchMode = 0
 
 	s.cmdCancel()
+	s.logger.MatchEnd()
+	s.logger = nil
 
 	s.alerter = analyzer.New(s.language)
-	s.col = collector.New(commanderInterval)
+	s.col = collector.New(s.commanderInterval)
 	s.lastAlert = time.Time{}
 	s.lastCommand = time.Time{}
+}
+
+// isNewMatch returns true when the current map name or game mode differs from
+// what was recorded at match start. When a change is detected it resets state
+// and logs the transition so the caller can start fresh confirmation.
+func (s *assistantState) isNewMatch(mapInfo *wt.MapInfo, mode wt.GameMode) bool {
+	currentMap := mapInfo.MapName
+
+	mapChanged := currentMap != "" && currentMap != s.matchMap
+	modeChanged := mode != s.matchMode
+
+	if !mapChanged && !modeChanged {
+		return false
+	}
+
+	log.Printf("New match detected (map %q→%q, mode %d→%d). Resetting.", s.matchMap, currentMap, s.matchMode, mode)
+	s.reset()
+
+	return true
 }
 
 func (s *assistantState) pollFrame(speak func(string)) {
@@ -258,6 +306,17 @@ func (s *assistantState) pollFrame(speak func(string)) {
 		return
 	}
 
+	mapInfo, _ := s.client.MapInfo()
+	if mapInfo == nil || !mapInfo.Valid {
+		notifyMatchEnded(s.inMatch, s.reset)
+		s.inMatch = false
+		s.confirmFrames = 0
+
+		return
+	}
+
+	mode := s.client.GameMode()
+
 	if !s.inMatch {
 		s.confirmFrames++
 		if s.confirmFrames < minConfirmFrames {
@@ -265,28 +324,153 @@ func (s *assistantState) pollFrame(speak func(string)) {
 		}
 
 		s.inMatch = true
+		s.matchMap = mapInfo.MapName
+		s.matchMode = mode
 		s.lastCommand = time.Now()
-
-		log.Println("Match started.")
+		s.logger = matchlog.New(s.logDir)
+		s.logger.MatchStart(mapInfo.MapName)
+		log.Printf("Match started. Map: %q, Mode: %d", mapInfo.MapName, mode)
+	} else if s.isNewMatch(mapInfo, mode) {
+		return
 	}
 
 	s.col.Add(objs)
 
-	mode := s.client.GameMode()
-
 	alert := s.alerter.Analyze(objs, mode)
-	s.lastAlert = dispatchAlert(alert, s.lastAlert, speak)
+	s.lastAlert = dispatchAlert(alert, s.lastAlert, int(s.notifications.MinPriority), s.logger, speak)
 
-	if time.Since(s.lastCommand) >= commanderInterval {
+	if s.cmd != nil && int(s.notifications.MinPriority) <= analyzer.PriorityCommander && time.Since(s.lastCommand) >= s.commanderInterval {
 		s.lastCommand = time.Now()
-		s.cmdCancel = invokeCommander(s.cmd, s.col, s.client, speak, s.cmdCancel)
+		s.cmdCancel = invokeCommander(s.cmd, s.col, s.client, s.logger, speak, s.cmdCancel)
 	}
 }
 
-func runAssistant(cfg config.Config) error {
+// logTTSConfig prints the [tts] section of the configuration.
+func logTTSConfig(tts *config.TTSConfig) {
+	log.Println("[tts]")
+
+	if tts == nil {
+		log.Printf("  Engine       : google-tts (default)")
+		log.Printf("  Volume       : 100%%")
+		log.Printf("  Speed        : 1.0x")
+
+		return
+	}
+
+	log.Printf("  Engine       : %s", tts.Engine)
+	log.Printf("  Volume       : %d%%", tts.Volume)
+	log.Printf("  Speed        : %.2fx", tts.Speed)
+
+	switch tts.Engine {
+	case config.EngineKokoro:
+		log.Printf("  Base URL     : %s", tts.BaseURL)
+		log.Printf("  Voice        : %s", tts.Voice)
+		log.Printf("  Model        : %s", tts.Model)
+
+		if tts.APIKeyEnv != "" {
+			log.Printf("  Env var      : %s %s", tts.APIKeyEnv, envStatus(tts.APIKeyEnv))
+		}
+	case config.EngineCamb:
+		log.Printf("  Voice        : %s", tts.Voice)
+		log.Printf("  Language     : %s", tts.Language)
+		log.Printf("  Env var      : %s %s", tts.APIKeyEnv, envStatus(tts.APIKeyEnv))
+	}
+}
+
+// envStatus returns "(set)" or "(not set)" for the given env var name.
+func envStatus(name string) string {
+	if os.Getenv(name) != "" {
+		return "(set)"
+	}
+
+	return "(not set)"
+}
+
+// logConfig prints every configuration value that the assistant will use,
+// including fields that were left at their defaults.
+func logConfig(cfg config.Config) {
+	log.Println("──── Configuration ────────────────────────────────────")
+	log.Printf("  Language     : %s", cfg.Language)
+	log.Printf("  WT source    : %s", cfg.WTSource)
+	log.Printf("  Poll         : %s", cfg.PollInterval)
+	log.Printf("  Alert cooldown: %s", alertCooldown)
+	log.Printf("  Commander    : every %s", cfg.CommanderInterval)
+
+	if cfg.LogDir != "" {
+		log.Printf("  Match logs   : %s", cfg.LogDir)
+	} else {
+		log.Printf("  Match logs   : disabled")
+	}
+
+	log.Println("[ai]")
+	log.Printf("  Engine       : %s", cfg.AI.Engine)
+	log.Printf("  Model        : %s", cfg.AI.Model)
+	log.Printf("  Mode         : %s", cfg.AI.Mode)
+	log.Printf("  Callsign     : %s", cfg.AI.Callsign)
+
+	switch cfg.AI.Engine {
+	case config.AIEngineAnthropic:
+		log.Printf("  Env var      : %s %s", cfg.AI.AnthropicEnv, envStatus(cfg.AI.AnthropicEnv))
+	default:
+		log.Printf("  Env var      : %s %s", cfg.AI.GroqEnv, envStatus(cfg.AI.GroqEnv))
+	}
+
+	logTTSConfig(cfg.TTS)
+
+	log.Println("[notifications]")
+	log.Printf("  Min priority : %d (1=Info 2=Warning 3=Critical 4=Commander only)", cfg.Notifications.MinPriority)
+
+	log.Println("[colors]")
+	log.Printf("  Tolerance    : %.0f", cfg.Colors.Tolerance)
+	log.Printf("  Player       : RGB(%.0f, %.0f, %.0f)", cfg.Colors.Player.R, cfg.Colors.Player.G, cfg.Colors.Player.B)
+	log.Printf("  Ally         : RGB(%.0f, %.0f, %.0f)", cfg.Colors.Ally.R, cfg.Colors.Ally.G, cfg.Colors.Ally.B)
+	log.Printf("  Enemy        : RGB(%.0f, %.0f, %.0f)", cfg.Colors.Enemy.R, cfg.Colors.Enemy.G, cfg.Colors.Enemy.B)
+	log.Printf("  Squad        : RGB(%.0f, %.0f, %.0f)", cfg.Colors.Squad.R, cfg.Colors.Squad.G, cfg.Colors.Squad.B)
+	log.Println("───────────────────────────────────────────────────────")
+}
+
+// openDebugFile creates a JSONL file for raw WT API responses.
+// The file is placed in cfg.LogDir when set, otherwise in the working directory.
+// The caller is responsible for closing the returned file.
+func openDebugFile(cfg config.Config) (*os.File, error) {
+	dir := cfg.LogDir
+	if dir == "" {
+		dir = "."
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create debug dir %q: %w", dir, err)
+	}
+
+	name := fmt.Sprintf("wt_debug_%s.jsonl", time.Now().UTC().Format("20060102T150405Z"))
+	path := dir + "/" + name
+
+	debugFile, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("create debug file: %w", err)
+	}
+
+	log.Printf("[debug] raw API data → %s", path)
+
+	return debugFile, nil
+}
+
+func runAssistant(cfg config.Config, debug bool) error {
+	logConfig(cfg)
+
 	wt.SetColors(cfg.Colors)
 
 	state := newAssistantState(cfg)
+
+	if debug {
+		debugFile, err := openDebugFile(cfg)
+		if err != nil {
+			return err
+		}
+		defer debugFile.Close()
+
+		state.client.SetDebugWriter(debugFile)
+	}
 
 	speech, err := initTTS(cfg)
 	if err != nil {
@@ -308,7 +492,7 @@ func runAssistant(cfg config.Config) error {
 	log.Println("War Thunder assistant started. Waiting for a match...")
 
 	for {
-		time.Sleep(pollInterval)
+		time.Sleep(cfg.PollInterval)
 		state.pollFrame(speak)
 	}
 }
