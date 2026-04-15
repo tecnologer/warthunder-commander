@@ -2,7 +2,6 @@ package tts
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/tecnologer/warthunder/internal/config"
@@ -37,22 +36,18 @@ func New(cfg config.TTSConfig) (*Speaker, error) {
 
 	switch engine {
 	case config.EngineGoogleTTS:
-		log.Printf("TTS: google-tts (language=%s)", language)
-
-		return &Speaker{speak: google.New(language, audioDir, cfg.Volume).Speak}, nil
+		return &Speaker{speak: google.New(language, audioDir, cfg.Volume, cfg.Speed).Speak}, nil
 
 	case config.EngineKokoro:
-		log.Printf("TTS: kokoro (voice=%s, model=%s, base_url=%s, volume=%d)", cfg.Voice, cfg.Model, cfg.BaseURL, cfg.Volume)
 		key := os.Getenv(cfg.APIKeyEnv)
-		spkr := kokoro.New(key, cfg.BaseURL, cfg.Voice, cfg.Model, audioDir, cfg.Volume)
+		spkr := kokoro.New(key, cfg.BaseURL, cfg.Voice, cfg.Model, audioDir, cfg.Volume, cfg.Speed)
 
 		return &Speaker{speak: spkr.Speak}, nil
 
 	case config.EngineCamb:
-		log.Printf("TTS: camb (voice=%s, language=%s, volume=%d)", cfg.Voice, cfg.Language, cfg.Volume)
 		key := os.Getenv(cfg.APIKeyEnv)
 
-		spkr, err := camb.New(key, cfg.Voice, cfg.Language, audioDir, cfg.Volume)
+		spkr, err := camb.New(key, cfg.Voice, cfg.Language, audioDir, cfg.Volume, cfg.Speed)
 		if err != nil {
 			return nil, fmt.Errorf("tts: camb: %w", err)
 		}
@@ -67,7 +62,5 @@ func New(cfg config.TTSConfig) (*Speaker, error) {
 
 // NewDefault returns a Google TTS speaker with no configuration.
 func NewDefault() *Speaker {
-	log.Printf("TTS: google-tts (language=%s)", language)
-
-	return &Speaker{speak: google.New(language, audioDir, 100).Speak}
+	return &Speaker{speak: google.New(language, audioDir, 100, 1.0).Speak}
 }

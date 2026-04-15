@@ -1,27 +1,46 @@
 package wt
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
-const baseURL = "http://localhost:8111"
-
 // Client fetches data from the War Thunder local API.
 type Client struct {
-	http *http.Client
+	http        *http.Client
+	baseURL     string
+	debugWriter io.Writer
+	debugMu     sync.Mutex
 }
 
 // NewClient returns a Client with a short timeout.
-func NewClient() *Client {
+// baseURL is the War Thunder local API address (e.g. "http://localhost:8111").
+func NewClient(baseURL string) *Client {
 	return &Client{
 		http: &http.Client{
 			Timeout: 2 * time.Second,
 		},
+		baseURL: baseURL,
 	}
+}
+
+// SetDebugWriter enables raw-response logging. On every successful HTTP
+// response the client appends a JSONL record:
+//
+//	{"ts":"<RFC3339nano>","path":"<path>","data":<raw_body>}
+//
+// Pass nil to disable. Safe to call concurrently.
+func (c *Client) SetDebugWriter(w io.Writer) {
+	c.debugMu.Lock()
+	defer c.debugMu.Unlock()
+
+	c.debugWriter = w
 }
 
 // MapObjects fetches and parses /map_obj.json.
@@ -96,7 +115,7 @@ func (c *Client) MapInfo() (*MapInfo, error) {
 }
 
 func (c *Client) get(path string, dst any) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("%s%s", baseURL, path), nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("%s%s", c.baseURL, path), nil)
 	if err != nil {
 		return fmt.Errorf("build request for %s: %w", path, err)
 	}
@@ -111,8 +130,23 @@ func (c *Client) get(path string, dst any) error {
 		return fmt.Errorf("unexpected status %d for %s", resp.StatusCode, path)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response for %s: %w", path, err)
+	}
+
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(dst); err != nil {
 		return fmt.Errorf("decode response for %s: %w", path, err)
+	}
+
+	c.debugMu.Lock()
+	debugWriter := c.debugWriter
+	c.debugMu.Unlock()
+
+	if debugWriter != nil {
+		ts := time.Now().UTC().Format(time.RFC3339Nano)
+		record := fmt.Sprintf(`{"ts":%q,"path":%q,"data":%s}`+"\n", ts, path, body)
+		_, _ = io.WriteString(debugWriter, record)
 	}
 
 	return nil

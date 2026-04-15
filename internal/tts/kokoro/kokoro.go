@@ -21,10 +21,11 @@ type Speaker struct {
 	model   string
 	dir     string
 	volume  int
+	speed   float64
 }
 
 // New returns a Speaker configured for the Kokoro TTS API.
-func New(apiKey, baseURL, voice, model, dir string, volume int) *Speaker {
+func New(apiKey, baseURL, voice, model, dir string, volume int, speed float64) *Speaker {
 	return &Speaker{
 		apiKey:  apiKey,
 		baseURL: baseURL,
@@ -32,6 +33,7 @@ func New(apiKey, baseURL, voice, model, dir string, volume int) *Speaker {
 		model:   model,
 		dir:     dir,
 		volume:  volume,
+		speed:   speed,
 	}
 }
 
@@ -58,7 +60,7 @@ func (k *Speaker) Speak(msg string) error {
 		}
 	}
 
-	if err := player.PlayFile(path, k.volume); err != nil {
+	if err := player.PlayFile(path, k.volume, k.speed); err != nil {
 		return fmt.Errorf("kokoro: play: %w", err)
 	}
 

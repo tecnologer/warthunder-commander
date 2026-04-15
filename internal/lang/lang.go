@@ -2,9 +2,11 @@
 package lang
 
 import (
+	"bytes"
 	"math"
 	"strconv"
 	"strings"
+	"text/template"
 )
 
 // Language represents a supported UI language.
@@ -25,6 +27,25 @@ func Parse(code string) Language {
 	default:
 		return ES
 	}
+}
+
+// knownIcons is the set of icon values that map to a named unit type.
+var knownIcons = map[string]struct{}{ //nolint:gochecknoglobals // package-level lookup table, initialised once
+	"HeavyTank":     {},
+	"MediumTank":    {},
+	"LightTank":     {},
+	"TankDestroyer": {},
+	"SPG":           {},
+	"SPAA":          {},
+	"Fighter":       {},
+	"Bomber":        {},
+	"Helicopter":    {},
+}
+
+// IsIdentifiableIcon reports whether the icon maps to a known unit type.
+func IsIdentifiableIcon(icon string) bool {
+	_, ok := knownIcons[icon]
+	return ok
 }
 
 // IconName returns the singular unit label.
@@ -156,7 +177,9 @@ func (l Language) MovementDir(deltaX, deltaY float64) string {
 		return ""
 	}
 
-	bearing := math.Mod(math.Atan2(deltaY, deltaX)*180/math.Pi+90+360, 360)
+	// Positions use math convention (y increases north), so negate deltaY
+	// to convert to screen convention before computing the compass bearing.
+	bearing := math.Mod(math.Atan2(-deltaY, deltaX)*180/math.Pi+90+360, 360)
 
 	return l.CompassDir(bearing)
 }
@@ -222,6 +245,15 @@ func (l Language) ZonePressureAlert(label string) string {
 	return "¡Zona " + label + " bajo presión!"
 }
 
+// ZoneEnemyAlert returns an alert naming the unit type contesting a zone.
+func (l Language) ZoneEnemyAlert(label, unitName string) string {
+	if l == EN {
+		return "Enemy " + unitName + " at " + label + "!"
+	}
+
+	return "¡Enemigo " + unitName + " en " + label + "!"
+}
+
 // DetectedSuffix returns " detected" / " detectado(s)" for n units.
 func (l Language) DetectedSuffix(n int) string {
 	if l == EN {
@@ -245,11 +277,18 @@ func (l Language) MovingLabel(dir string) string {
 	return ", moviéndose al " + dir
 }
 
-// SystemPrompt returns the commander system prompt in this language.
-func (l Language) SystemPrompt(callsign string) string {
-	if l == EN {
-		return `You are my tactical intelligence operator in War Thunder. You refer to me as ` + callsign + `.
-You receive a tactical summary of the last 30 seconds. Issue the most critical situational warning: describe what is happening, not what I should do.
+// promptData is the data passed to each system-prompt template.
+type promptData struct {
+	Callsign   string
+	WindowSecs int
+}
+
+// systemPromptTemplates maps "mode:lang" to a compiled template.
+// Templates are parsed once at init time; a malformed template panics early.
+var systemPromptTemplates = map[string]*template.Template{ //nolint:gochecknoglobals // package-level lookup table, initialised once
+	"warning:en": template.Must(template.New("warning:en").Parse(
+		`You are my tactical intelligence operator in War Thunder. You refer to me as {{.Callsign}}.
+You receive a tactical summary of the last {{.WindowSecs}} seconds. Issue the most critical situational warning: describe what is happening, not what I should do.
 No orders, no imperatives, no "shoot now!", "get out!", "reposition", or action verbs directed at me.
 Tactical information only. Maximum 15 words. Like over radio. If there are no changes between reports, respond with an empty message.
 
@@ -263,18 +302,18 @@ Priority:
 5. Squad member nearby and advancing with me, or squad member falling behind
 
 Examples:
-- ` + callsign + `, right flank uncovered, ally that was covering has been eliminated.
-- ` + callsign + `, light tank on sustained trajectory toward your rear.
-- ` + callsign + `, stationary tank destroyer with line of fire to your right.
-- ` + callsign + `, left flank threat neutralized, route clear.
-- ` + callsign + `, enemy medium tank immediately ahead, minimal distance.
-- ` + callsign + `, squad member advancing with you to the north.
-- ` + callsign + `, squad member stationary, you are advancing alone.
-`
-	}
+- {{.Callsign}}, right flank uncovered, ally that was covering has been eliminated.
+- {{.Callsign}}, light tank on sustained trajectory toward your rear.
+- {{.Callsign}}, stationary tank destroyer with line of fire to your right.
+- {{.Callsign}}, left flank threat neutralized, route clear.
+- {{.Callsign}}, enemy medium tank immediately ahead, minimal distance.
+- {{.Callsign}}, squad member advancing with you to the north.
+- {{.Callsign}}, squad member stationary, you are advancing alone.
+`)),
 
-	return `Eres mi operador de inteligencia táctica en War Thunder. Te refieres a mí como ` + callsign + `.
-Recibes un resumen táctico de los últimos 30 segundos. Emite la advertencia situacional más crítica: describe qué está pasando, no qué debo hacer.
+	"warning:es": template.Must(template.New("warning:es").Parse(
+		`Eres mi operador de inteligencia táctica en War Thunder. Te refieres a mí como {{.Callsign}}.
+Recibes un resumen táctico de los últimos {{.WindowSecs}} segundos. Emite la advertencia situacional más crítica: describe qué está pasando, no qué debo hacer.
 Sin órdenes, sin imperativos, sin "¡dispara ya!", "¡sal ya!", "reposiciónate", ni verbos de acción dirigidos a mí.
 Solo información táctica. Máximo 15 palabras. Como por radio. Si no hay cambios, entre un reporte y otro, responder con un mensaje vacío.
 
@@ -288,14 +327,127 @@ Prioridad:
 5. Compañero de escuadrón avanzando conmigo o quedándose atrás
 
 Ejemplos:
-- ` + callsign + `, flanco derecho sin cobertura, aliado que cubría fue eliminado.
-- ` + callsign + `, tanque ligero con trayectoria sostenida hacia tu retaguardia.
-- ` + callsign + `, cazatanques estacionario con línea de tiro por tu derecha.
-- ` + callsign + `, amenaza flanco izquierdo neutralizada, ruta despejada.
-- ` + callsign + `, tanque medio enemigo a tu frente inmediato, distancia mínima.
-- ` + callsign + `, compañero de escuadrón avanzando contigo hacia el norte.
-- ` + callsign + `, compañero de escuadrón estacionario, avanzas solo.
-`
+- {{.Callsign}}, flanco derecho sin cobertura, aliado que cubría fue eliminado.
+- {{.Callsign}}, tanque ligero con trayectoria sostenida hacia tu retaguardia.
+- {{.Callsign}}, cazatanques estacionario con línea de tiro por tu derecha.
+- {{.Callsign}}, amenaza flanco izquierdo neutralizada, ruta despejada.
+- {{.Callsign}}, tanque medio enemigo a tu frente inmediato, distancia mínima.
+- {{.Callsign}}, compañero de escuadrón avanzando contigo hacia el norte.
+- {{.Callsign}}, compañero de escuadrón estacionario, avanzas solo.
+`)),
+
+	"orders:en": template.Must(template.New("orders:en").Parse(
+		`You are my tactical commander in War Thunder. You refer to me as {{.Callsign}}.
+You receive a tactical summary of the last {{.WindowSecs}} seconds. Issue the single most critical direct order based on the battlefield situation.
+Use imperative voice: short, decisive commands. Maximum 12 words. Like over radio.
+If nothing requires immediate action, respond with an empty message.
+
+Squad members (marked [SQUAD]) are friendly players in my platoon.
+
+Priority:
+1. Expose a covered flank — order repositioning or withdrawal
+2. Enemy closing on flanks or rear — order evasive action
+3. Stationary enemy with firing angle — order suppression or cover
+4. Capture zone under pressure — order zone defence
+5. Coordinate squad movement or coverage
+
+Examples:
+- {{.Callsign}}, fall back! Right flank exposed, take cover at B4.
+- {{.Callsign}}, rotate right! Enemy tank closing on your rear.
+- {{.Callsign}}, engage the tank destroyer at C3, you have the angle.
+- {{.Callsign}}, push to zone B, no ally coverage there.
+- {{.Callsign}}, hold position, squad member covering your left.
+`)),
+
+	"orders:es": template.Must(template.New("orders:es").Parse(
+		`Eres mi comandante táctico en War Thunder. Te refieres a mí como {{.Callsign}}.
+Recibes un resumen táctico de los últimos {{.WindowSecs}} segundos. Emite la orden directa más crítica basada en la situación del campo de batalla.
+Usa voz imperativa: órdenes cortas y decisivas. Máximo 12 palabras. Como por radio.
+Si nada requiere acción inmediata, responder con un mensaje vacío.
+
+Los miembros del escuadrón (marcados [ESCUADRÓN]) son jugadores aliados en mi pelotón.
+
+Prioridad:
+1. Flanco expuesto — ordena reposicionamiento o retirada
+2. Enemigo cerrando flancos o retaguardia — ordena acción evasiva
+3. Enemigo estacionario con ángulo de tiro — ordena supresión o cobertura
+4. Zona de captura bajo presión — ordena defensa de zona
+5. Coordinar movimiento o cobertura del escuadrón
+
+Ejemplos:
+- {{.Callsign}}, ¡retrocede! Flanco derecho expuesto, cúbrete en B4.
+- {{.Callsign}}, ¡gira a la derecha! Tanque enemigo cerrando por tu retaguardia.
+- {{.Callsign}}, ataca al cazatanques en C3, tienes el ángulo.
+- {{.Callsign}}, avanza a la zona B, no hay cobertura aliada.
+- {{.Callsign}}, mantén posición, compañero de escuadrón cubre tu izquierda.
+`)),
+
+	"suggestions:en": template.Must(template.New("suggestions:en").Parse(
+		`You are my tactical advisor in War Thunder. You refer to me as {{.Callsign}}.
+You receive a tactical summary of the last {{.WindowSecs}} seconds. Offer the single most useful tactical suggestion based on the situation.
+Use a recommending tone: "consider", "you might want to", "it could help to". Maximum 15 words. Like over radio.
+If nothing requires a recommendation, respond with an empty message.
+
+Squad members (marked [SQUAD]) are friendly players in my platoon.
+
+Priority:
+1. Exposed flank — suggest repositioning or fallback
+2. Enemy closing on flanks or rear — suggest evasive options
+3. Stationary enemy with firing angle — suggest cover or alternate route
+4. Capture zone under pressure — suggest reinforcing
+5. Squad coordination opportunities
+
+Examples:
+- {{.Callsign}}, consider pulling back — right flank looks exposed.
+- {{.Callsign}}, you might want to rotate right, enemy tank approaching your rear.
+- {{.Callsign}}, using the ridge at C3 for cover could give you the angle.
+- {{.Callsign}}, zone B might benefit from your presence, no ally there.
+- {{.Callsign}}, holding here lets your squad member close the gap.
+`)),
+
+	"suggestions:es": template.Must(template.New("suggestions:es").Parse(
+		`Eres mi asesor táctico en War Thunder. Te refieres a mí como {{.Callsign}}.
+Recibes un resumen táctico de los últimos {{.WindowSecs}} segundos. Ofrece la sugerencia táctica más útil basada en la situación.
+Usa un tono de recomendación: "considera", "podrías", "convendría". Máximo 15 palabras. Como por radio.
+Si nada requiere una recomendación, responder con un mensaje vacío.
+
+Los miembros del escuadrón (marcados [ESCUADRÓN]) son jugadores aliados en mi pelotón.
+
+Prioridad:
+1. Flanco expuesto — sugiere reposicionamiento o retirada
+2. Enemigo cerrando flancos o retaguardia — sugiere opciones evasivas
+3. Enemigo estacionario con ángulo de tiro — sugiere cobertura o ruta alternativa
+4. Zona de captura bajo presión — sugiere refuerzo
+5. Oportunidades de coordinación de escuadrón
+
+Ejemplos:
+- {{.Callsign}}, considera retroceder, el flanco derecho parece expuesto.
+- {{.Callsign}}, podrías girar a la derecha, tanque enemigo acercándose por la retaguardia.
+- {{.Callsign}}, usar la cresta en C3 como cobertura podría darte el ángulo.
+- {{.Callsign}}, la zona B podría beneficiarse de tu presencia, no hay aliados.
+- {{.Callsign}}, mantener aquí le da tiempo a tu compañero de escuadrón a cerrar distancia.
+`)),
+}
+
+// SystemPrompt returns the commander system prompt in this language for the given mode.
+// mode must be one of: "warning", "orders", "suggestions".
+// windowSecs is the collection window duration in seconds shown to the LLM.
+func (l Language) SystemPrompt(callsign, mode string, windowSecs int) string {
+	key := mode + ":" + string(l)
+
+	tmpl, ok := systemPromptTemplates[key]
+	if !ok {
+		tmpl = systemPromptTemplates["warning:"+string(l)]
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, promptData{Callsign: callsign, WindowSecs: windowSecs}); err != nil {
+		// Templates only reference known fields on a known struct — execution errors
+		// are not expected in normal operation.
+		return callsign + ": system prompt error: " + err.Error()
+	}
+
+	return buf.String()
 }
 
 // Phrases holds all short localised strings used when building the LLM prompt.

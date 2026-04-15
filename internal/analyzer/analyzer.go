@@ -30,9 +30,10 @@ const (
 
 // Priority levels for alerts.
 const (
-	PriorityInfo     = 1
-	PriorityWarning  = 2
-	PriorityCritical = 3
+	PriorityInfo      = 1
+	PriorityWarning   = 2
+	PriorityCritical  = 3
+	PriorityCommander = 4 // AI tactical-commander reports
 )
 
 // Alert represents a single voice alert to be spoken.
@@ -137,7 +138,11 @@ func (a *Analyzer) expireTracked(now time.Time) {
 
 // processFlankEnemy handles flank detection for a single enemy, updating tracking
 // state and returning a flank alert if the enemy is in a new or re-entered flank position.
-func (a *Analyzer) processFlankEnemy(player, enemy *wt.MapObject, now time.Time, best *Alert) *Alert {
+func (a *Analyzer) processFlankEnemy(player, enemy *wt.MapObject, now time.Time, mode wt.GameMode, best *Alert) *Alert {
+	if mode == wt.GameModeRealistic && !lang.IsIdentifiableIcon(enemy.Icon) {
+		return best
+	}
+
 	inRange := wt.Dist(player, enemy) <= flankDistance
 	angle := relativeAngle(player, enemy)
 	inFlank := inRange && math.Abs(angle) > flankAngleThreshold
@@ -170,7 +175,7 @@ func (a *Analyzer) processFlankEnemy(player, enemy *wt.MapObject, now time.Time,
 }
 
 // processFlankAlerts runs flank detection for all enemies and returns the best alert found.
-func (a *Analyzer) processFlankAlerts(player *wt.MapObject, enemies []wt.MapObject, now time.Time) *Alert {
+func (a *Analyzer) processFlankAlerts(player *wt.MapObject, enemies []wt.MapObject, now time.Time, mode wt.GameMode) *Alert {
 	if player == nil {
 		return nil
 	}
@@ -178,37 +183,49 @@ func (a *Analyzer) processFlankAlerts(player *wt.MapObject, enemies []wt.MapObje
 	var best *Alert
 
 	for idx := range enemies {
-		best = a.processFlankEnemy(player, &enemies[idx], now, best)
+		best = a.processFlankEnemy(player, &enemies[idx], now, mode, best)
 	}
 
 	return best
 }
 
+// updateKnownEnemy refreshes position tracking for an already-tracked enemy
+// and queues it in pendingNew once confirmed on a second frame.
+func (a *Analyzer) updateKnownEnemy(trackIdx int, enemy *wt.MapObject, isClose bool, now time.Time, mode wt.GameMode) {
+	prev := a.tracked[trackIdx].obj
+	a.tracked[trackIdx].prevObj = prev
+	a.tracked[trackIdx].obj = *enemy
+	a.tracked[trackIdx].lastSeen = now
+
+	if isClose {
+		a.tracked[trackIdx].wasClose = true
+	}
+
+	if a.tracked[trackIdx].confirmed {
+		return
+	}
+
+	a.tracked[trackIdx].confirmed = true
+
+	// In Realistic mode, only alert when the enemy type can be identified.
+	if mode != wt.GameModeRealistic || lang.IsIdentifiableIcon(enemy.Icon) {
+		a.pendingNew = append(a.pendingNew, pendingEnemy{
+			icon: enemy.Icon,
+			dir:  a.movementDir(prev, *enemy),
+		})
+		a.lastNewEnemy = now
+	}
+}
+
 // updateTrackedEnemies updates position tracking for all current enemies
 // and queues newly confirmed enemies in pendingNew.
-func (a *Analyzer) updateTrackedEnemies(player *wt.MapObject, enemies []wt.MapObject, now time.Time) {
+func (a *Analyzer) updateTrackedEnemies(player *wt.MapObject, enemies []wt.MapObject, now time.Time, mode wt.GameMode) {
 	for idx := range enemies {
 		enemy := &enemies[idx]
 		isClose := player != nil && wt.Dist(player, enemy) <= flankDistance
 
 		if trackIdx := a.findTracked(enemy); trackIdx >= 0 {
-			prev := a.tracked[trackIdx].obj
-			a.tracked[trackIdx].prevObj = prev
-			a.tracked[trackIdx].obj = *enemy
-			a.tracked[trackIdx].lastSeen = now
-
-			if isClose {
-				a.tracked[trackIdx].wasClose = true
-			}
-
-			if !a.tracked[trackIdx].confirmed {
-				a.tracked[trackIdx].confirmed = true
-				a.pendingNew = append(a.pendingNew, pendingEnemy{
-					icon: enemy.Icon,
-					dir:  a.movementDir(prev, *enemy),
-				})
-				a.lastNewEnemy = now
-			}
+			a.updateKnownEnemy(trackIdx, enemy, isClose, now, mode)
 		} else {
 			// First time seeing this enemy — register but wait one frame for direction.
 			a.tracked = append(a.tracked, trackedEnemy{
@@ -257,7 +274,8 @@ func (a *Analyzer) processZoneAlerts(zones, enemies []wt.MapObject, now time.Tim
 			continue
 		}
 
-		if !zoneHasNearbyEnemy(zone, enemies) {
+		enemy := closestEnemyInZone(zone, enemies)
+		if enemy == nil {
 			continue
 		}
 
@@ -270,22 +288,28 @@ func (a *Analyzer) processZoneAlerts(zones, enemies []wt.MapObject, now time.Tim
 		label := a.zoneLabels[key]
 		best = highest(best, &Alert{
 			Priority: PriorityWarning,
-			Message:  a.lang.ZonePressureAlert(label),
+			Message:  a.lang.ZoneEnemyAlert(label, a.lang.IconName(enemy.Icon)),
 		})
 	}
 
 	return best
 }
 
-// zoneHasNearbyEnemy reports whether any enemy is within captureZoneRadius of zone.
-func zoneHasNearbyEnemy(zone *wt.MapObject, enemies []wt.MapObject) bool {
+// closestEnemyInZone returns the closest enemy within captureZoneRadius of zone,
+// or nil when no such enemy exists.
+func closestEnemyInZone(zone *wt.MapObject, enemies []wt.MapObject) *wt.MapObject {
+	var closest *wt.MapObject
+
+	minDist := captureZoneRadius
+
 	for idx := range enemies {
-		if wt.Dist(zone, &enemies[idx]) < captureZoneRadius {
-			return true
+		if d := wt.Dist(zone, &enemies[idx]); d < minDist {
+			minDist = d
+			closest = &enemies[idx]
 		}
 	}
 
-	return false
+	return closest
 }
 
 // Analyze computes the highest-priority alert for the current frame.
@@ -299,8 +323,8 @@ func (a *Analyzer) Analyze(objs []wt.MapObject, mode wt.GameMode) *Alert {
 	now := time.Now()
 	a.expireTracked(now)
 
-	best := a.processFlankAlerts(player, enemies, now)
-	a.updateTrackedEnemies(player, enemies, now)
+	best := a.processFlankAlerts(player, enemies, now, mode)
+	a.updateTrackedEnemies(player, enemies, now, mode)
 
 	if flushAlert := a.flushPendingAlerts(now); flushAlert != nil {
 		best = highest(best, flushAlert)
@@ -418,14 +442,19 @@ func (a *Analyzer) movementDir(src, dst wt.MapObject) string {
 }
 
 // relativeAngle returns the bearing of enemy relative to player's heading in degrees.
-// 0° = straight ahead, ±90° = sides, ±180° = behind.
+// 0° = straight ahead, positive = right, negative = left, ±180° = behind.
+//
+// Coordinate system note: map positions use math convention (y=0 south, y
+// increases north) while the heading vector (DX, DY) uses screen convention
+// (DY > 0 means heading south). The dot and cross products below account for
+// this mismatch by negating the Y component of the heading when projecting
+// onto the map-position offset.
 func relativeAngle(player, enemy *wt.MapObject) float64 {
 	ex := enemy.X - player.X
 	ey := enemy.Y - player.Y
-	hx := player.DX
-	hy := player.DY
-	dot := hx*ex + hy*ey
-	cross := hx*ey - hy*ex
+	// Convert heading to map convention: map_hy = -DY
+	dot := player.DX*ex - player.DY*ey
+	cross := -player.DY*ex - player.DX*ey
 
 	return math.Atan2(cross, dot) * 180 / math.Pi
 }
@@ -448,6 +477,10 @@ func assignZoneLabels(zones []wt.MapObject) map[string]string {
 }
 
 func highest(current, candidate *Alert) *Alert {
+	if candidate == nil {
+		return current
+	}
+
 	if current == nil || candidate.Priority > current.Priority {
 		return candidate
 	}

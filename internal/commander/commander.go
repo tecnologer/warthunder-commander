@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tecnologer/warthunder/internal/collector"
 	"github.com/tecnologer/warthunder/internal/config"
@@ -35,14 +38,25 @@ type Report struct {
 	Message string
 }
 
-// New returns a Commander. It selects the backend specified by aiCfg.Engine
-// ("groq" by default, "anthropic" as the alternative).
-func New(aiCfg config.AIConfig, language lang.Language) *Commander {
+// New returns a Commander, or nil if no API key is configured for the selected
+// engine. A nil Commander is valid — callers should skip AI reports in that case.
+// commanderInterval is used to set the window duration in the system prompt.
+func New(aiCfg config.AIConfig, language lang.Language, commanderInterval time.Duration) *Commander {
+	keyEnv := aiCfg.GroqEnv
+	if aiCfg.Engine == config.AIEngineAnthropic {
+		keyEnv = aiCfg.AnthropicEnv
+	}
+
+	if os.Getenv(keyEnv) == "" {
+		log.Printf("[commander] env var %q not set — AI commander disabled", keyEnv)
+		return nil
+	}
+
 	var llm backend
 	if aiCfg.Engine == config.AIEngineAnthropic {
-		llm = newAnthropicBackend(aiCfg.AnthropicEnv)
+		llm = newAnthropicBackend(aiCfg.Model)
 	} else {
-		llm = newGroqBackend(aiCfg.GroqEnv)
+		llm = newGroqBackend(aiCfg.GroqEnv, aiCfg.Model)
 	}
 
 	callsign := aiCfg.Callsign
@@ -50,26 +64,28 @@ func New(aiCfg config.AIConfig, language lang.Language) *Commander {
 		callsign = "Bronco"
 	}
 
-	return &Commander{llm: llm, lang: language, systemPrompt: language.SystemPrompt(callsign)}
+	windowSecs := int(commanderInterval.Seconds())
+
+	return &Commander{llm: llm, lang: language, systemPrompt: language.SystemPrompt(callsign, aiCfg.Mode, windowSecs)}
 }
 
-// Advise builds a tactical prompt from the 30-second summary, calls the
-// backend, and returns a tactical report. Returns nil, ErrNoReport when there
-// is nothing actionable to report.
-func (c *Commander) Advise(ctx context.Context, sum *collector.Summary, mapInfo *wt.MapInfo) (*Report, error) {
+// Advise builds a tactical prompt from the summary, calls the backend, and
+// returns a tactical report. Prompt is always populated even when ErrNoReport
+// is returned, so callers can log it for debugging.
+func (c *Commander) Advise(ctx context.Context, sum *collector.Summary, mapInfo *wt.MapInfo) (*Report, string, error) {
 	prompt := c.buildPrompt(sum, mapInfo)
 
 	text, err := c.llm.complete(ctx, c.systemPrompt, prompt)
 	if err != nil {
-		return nil, err
+		return nil, prompt, err
 	}
 
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, ErrNoReport
+		return nil, prompt, ErrNoReport
 	}
 
-	return &Report{Message: text}, nil
+	return &Report{Message: text}, prompt, nil
 }
 
 // gridCols and gridRows define the standard War Thunder minimap grid size.
@@ -83,7 +99,9 @@ const (
 // such as "E3". Clamps values that fall on or past the boundary.
 func gridRef(x, y float64) string {
 	col := int(x * gridCols)
-	row := int(y * gridRows)
+	// The War Thunder API uses y=0 at the south edge of the map, but minimap
+	// row labels increase northward (row 1 at top). Invert y before quantising.
+	row := int((1 - y) * gridRows)
 
 	if col >= gridCols {
 		col = gridCols - 1
@@ -180,7 +198,7 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 		} else {
 			dx, dy := squadTrack.Displacement()
 			dist := math.Hypot(dx, dy)
-			bearing := math.Mod(math.Atan2(dy, dx)*180/math.Pi+90+360, 360)
+			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			dir := c.lang.CompassDir(bearing)
 			line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
 		}
@@ -210,7 +228,7 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 		} else {
 			dx, dy := enemyTrack.Displacement()
 			dist := math.Hypot(dx, dy)
-			bearing := math.Mod(math.Atan2(dy, dx)*180/math.Pi+90+360, 360)
+			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			dir := c.lang.CompassDir(bearing)
 			line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
 		}
@@ -241,11 +259,13 @@ func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phr
 
 // relativeDir returns the enemy's bearing relative to the player's heading as
 // a localised label.
+//
+// See relativeAngle in analyzer.go for the coordinate-system explanation.
 func (c *Commander) relativeDir(player, enemy *wt.MapObject) string {
 	ex := enemy.X - player.X
 	ey := enemy.Y - player.Y
-	dot := player.DX*ex + player.DY*ey
-	cross := player.DX*ey - player.DY*ex
+	dot := player.DX*ex - player.DY*ey
+	cross := -player.DY*ex - player.DX*ey
 	angle := math.Atan2(cross, dot) * 180 / math.Pi
 
 	return c.lang.RelativeDir(angle)

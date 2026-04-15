@@ -60,6 +60,7 @@ type MapObject struct {
 
 // MapInfo represents /map_info.json metadata.
 type MapInfo struct {
+	Valid         bool    `json:"valid"`
 	MapName       string  `json:"map_name"`
 	MapSizeX      float64 `json:"map_size_x"`
 	MapSizeY      float64 `json:"map_size_y"`

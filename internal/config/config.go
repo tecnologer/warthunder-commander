@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,12 +24,68 @@ const (
 	AIEngineAnthropic = "anthropic"
 )
 
+// Valid AI commander mode identifiers.
+const (
+	AIModeWarning     = "warning"     // situational alerts only — describes what is happening, no action verbs
+	AIModeOrders      = "orders"      // direct tactical orders ("Reposition to B4", "Engage from the right")
+	AIModeSuggestions = "suggestions" // soft recommendations ("Consider repositioning to B4")
+)
+
+// DefaultWTSource is the default War Thunder local API address.
+const DefaultWTSource = "http://localhost:8111"
+
 // Config holds all user-tunable settings.
 type Config struct {
-	Language string       `toml:"language"` // "es" (default) or "en"
-	AI       AIConfig     `toml:"ai"`
-	Colors   ColorsConfig `toml:"colors"`
-	TTS      *TTSConfig   `toml:"tts"`
+	Language          string              `toml:"language"`           // "es" (default) or "en"
+	WTSource          string              `toml:"wt_source"`          // War Thunder API base URL (default: http://localhost:8111)
+	PollInterval      time.Duration       `toml:"poll_interval"`      // how often to query the WT API (default: 500ms)
+	CommanderInterval time.Duration       `toml:"commander_interval"` // how often to invoke the AI commander (default: 30s)
+	LogDir            string              `toml:"log_dir"`            // directory for per-match debug logs; empty = disabled
+	AI                AIConfig            `toml:"ai"`
+	Colors            ColorsConfig        `toml:"colors"`
+	TTS               *TTSConfig          `toml:"tts"`
+	Notifications     NotificationsConfig `toml:"notifications"`
+}
+
+// MinPriority is the lowest notification level that will be delivered.
+// It accepts either an integer (1–4) or the string "commander" (≡ 4).
+//
+//	1 = Info      — all alerts + commander (default)
+//	2 = Warning   — Warning, Critical, and Commander
+//	3 = Critical  — Critical and Commander only
+//	4 / "commander" — Commander reports only (regular alerts silenced)
+type MinPriority int
+
+// UnmarshalTOML satisfies toml.Unmarshaler so the field can be set as either
+// an integer or the string "commander" in config.toml.
+func (p *MinPriority) UnmarshalTOML(v any) error { //nolint:varnamelen // 'v' matches the toml.Unmarshaler interface convention
+	switch val := v.(type) {
+	case int64:
+		*p = MinPriority(val)
+	case string:
+		if val == "commander" {
+			*p = MinPriority(4)
+			return nil
+		}
+
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("min_priority: expected integer (1–4) or \"commander\", got %q", val)
+		}
+
+		*p = MinPriority(n)
+	default:
+		return fmt.Errorf("min_priority: expected integer or \"commander\", got %T", v)
+	}
+
+	return nil
+}
+
+// NotificationsConfig controls which alerts are delivered to the player.
+type NotificationsConfig struct {
+	// MinPriority is the lowest alert priority that will be spoken aloud.
+	// Accepts 1–4 or the string "commander". Default: 1 (all alerts).
+	MinPriority MinPriority `toml:"min_priority"`
 }
 
 // TTSConfig controls text-to-speech synthesis.
@@ -53,6 +111,9 @@ type TTSConfig struct {
 	// Volume controls playback volume as a percentage (0–200, default 100).
 	// Values above 100 amplify the audio beyond the original level.
 	Volume int `toml:"volume"`
+	// Speed controls playback speed as a multiplier (0.25–4.0, default 1.0).
+	// Values below 1.0 slow down the voice; values above 1.0 speed it up.
+	Speed float64 `toml:"speed"`
 }
 
 // cambDefaults holds the default values applied when engine = "camb" and the
@@ -79,26 +140,47 @@ func (c *TTSConfig) Validate() error {
 		c.Volume = 100
 	}
 
-	if c.Engine == EngineCamb {
-		if c.APIKeyEnv == "" {
-			c.APIKeyEnv = cambDefaultAPIKeyEnv
-		}
-		// Voice is intentionally left empty when unconfigured so that
-		// cambResolveVoice can print available voices and guide the user.
-		if c.Language == "" {
-			c.Language = cambDefaultLanguage
-		}
+	if c.Speed == 0 {
+		c.Speed = 1.0
+	}
 
-		if os.Getenv(c.APIKeyEnv) == "" {
-			return fmt.Errorf("tts.engine \"camb\": environment variable %q is not set or empty", c.APIKeyEnv)
-		}
+	if c.Speed < 0.25 || c.Speed > 4.0 {
+		return fmt.Errorf("tts.speed %.2f is out of range; must be between 0.25 and 4.0", c.Speed)
+	}
+
+	if c.Engine == EngineCamb {
+		return c.validateCamb()
 	}
 
 	return nil
 }
 
+// validateCamb fills CAMB.AI defaults and checks that the API key is set.
+func (c *TTSConfig) validateCamb() error {
+	if c.APIKeyEnv == "" {
+		c.APIKeyEnv = cambDefaultAPIKeyEnv
+	}
+
+	// Voice is intentionally left empty when unconfigured so that
+	// cambResolveVoice can print available voices and guide the user.
+	if c.Language == "" {
+		c.Language = cambDefaultLanguage
+	}
+
+	if os.Getenv(c.APIKeyEnv) == "" {
+		return fmt.Errorf("tts.engine \"camb\": environment variable %q is not set or empty", c.APIKeyEnv)
+	}
+
+	return nil
+}
+
+const (
+	maxCallsignWords = 3
+	maxCallsignChars = 24
+)
+
 // Validate fills in the default AI engine and returns an error if the engine
-// name is invalid.
+// name is invalid or the callsign exceeds the allowed length.
 func (a *AIConfig) Validate() error {
 	if a.Engine == "" {
 		a.Engine = AIEngineGroq
@@ -110,8 +192,42 @@ func (a *AIConfig) Validate() error {
 			a.Engine, strings.Join(validEngines, ", "))
 	}
 
+	if a.Model == "" {
+		if a.Engine == AIEngineAnthropic {
+			a.Model = DefaultAnthropicModel
+		} else {
+			a.Model = DefaultGroqModel
+		}
+	}
+
+	if a.Mode == "" {
+		a.Mode = AIModeWarning
+	}
+
+	validModes := []string{AIModeWarning, AIModeOrders, AIModeSuggestions}
+	if !slices.Contains(validModes, a.Mode) {
+		return fmt.Errorf("ai.mode %q is not valid; must be one of: %s",
+			a.Mode, strings.Join(validModes, ", "))
+	}
+
+	if a.Callsign != "" {
+		if len([]rune(a.Callsign)) > maxCallsignChars {
+			return fmt.Errorf("ai.callsign %q exceeds %d characters", a.Callsign, maxCallsignChars)
+		}
+
+		if len(strings.Fields(a.Callsign)) > maxCallsignWords {
+			return fmt.Errorf("ai.callsign %q exceeds %d words", a.Callsign, maxCallsignWords)
+		}
+	}
+
 	return nil
 }
+
+// Default model identifiers per engine.
+const (
+	DefaultGroqModel      = "llama-3.3-70b-versatile"
+	DefaultAnthropicModel = "claude-sonnet-4-6"
+)
 
 // AIConfig controls which environment variable is read for each LLM backend.
 type AIConfig struct {
@@ -120,6 +236,10 @@ type AIConfig struct {
 	GroqEnv      string `toml:"groq_env"`
 	AnthropicEnv string `toml:"anthropic_env"`
 	Callsign     string `toml:"callsign"` // how the commander addresses the player; default "Bronco"
+	Model        string `toml:"model"`    // LLM model name; defaults per engine if omitted
+	// Mode controls how the AI frames its output.
+	// Valid values: "warning" (default), "orders", "suggestions".
+	Mode string `toml:"mode"`
 }
 
 // ColorsConfig defines the RGB reference values used to identify each team.
@@ -141,12 +261,16 @@ type RGBColor struct {
 // defaults returns a Config with the values that were previously hardcoded.
 func defaults() Config {
 	return Config{
-		Language: "es",
+		Language:          "es",
+		WTSource:          DefaultWTSource,
+		PollInterval:      500 * time.Millisecond,
+		CommanderInterval: 30 * time.Second,
 		AI: AIConfig{
 			Engine:       AIEngineGroq,
 			GroqEnv:      "GROQ_API_KEY",
 			AnthropicEnv: "ANTHROPIC_API_KEY",
 			Callsign:     "Bronco",
+			Mode:         AIModeWarning,
 		},
 		Colors: ColorsConfig{
 			Tolerance: 30,
@@ -156,6 +280,9 @@ func defaults() Config {
 			Squad:     RGBColor{R: 103, G: 215, B: 86},
 		},
 		TTS: nil,
+		Notifications: NotificationsConfig{
+			MinPriority: 1,
+		},
 	}
 }
 
@@ -167,9 +294,12 @@ func Load(path string) (Config, error) {
 		return cfg, nil
 	}
 
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return cfg, fmt.Errorf("config: decode %s: %w", path, err)
 	}
+
+	_ = meta // used for future key-presence checks if needed
 
 	if cfg.TTS != nil {
 		if err := cfg.TTS.Validate(); err != nil {

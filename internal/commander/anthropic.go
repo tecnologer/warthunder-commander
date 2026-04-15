@@ -3,7 +3,6 @@ package commander
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -11,17 +10,16 @@ import (
 
 type anthropicBackend struct {
 	client anthropic.Client
+	model  anthropic.Model
 }
 
-func newAnthropicBackend(envVar string) *anthropicBackend {
-	log.Printf("[commander] using Anthropic backend (model: %s, env: %s)", anthropic.ModelClaudeOpus4_6, envVar)
-
-	return &anthropicBackend{client: anthropic.NewClient()}
+func newAnthropicBackend(model string) *anthropicBackend {
+	return &anthropicBackend{client: anthropic.NewClient(), model: model}
 }
 
 func (a *anthropicBackend) complete(ctx context.Context, systemPrompt, prompt string) (string, error) {
 	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeOpus4_6,
+		Model:     a.model,
 		MaxTokens: 100,
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfDisabled: new(anthropic.NewThinkingConfigDisabledParam())},
 		System: []anthropic.TextBlockParam{{

@@ -6,33 +6,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 )
 
-const (
-	groqEndpoint = "https://api.groq.com/openai/v1/chat/completions"
-	groqModel    = "llama-3.3-70b-versatile"
-)
+const groqEndpoint = "https://api.groq.com/openai/v1/chat/completions"
 
 type groqBackend struct {
 	apiKey string
+	model  string
 	http   *http.Client
 }
 
-func newGroqBackend(envVar string) *groqBackend {
-	log.Printf("[commander] using Groq backend (model: %s, env: %s)", groqModel, envVar)
-
+func newGroqBackend(envVar, model string) *groqBackend {
 	return &groqBackend{
 		apiKey: os.Getenv(envVar),
+		model:  model,
 		http:   &http.Client{},
 	}
 }
 
 func (g *groqBackend) complete(ctx context.Context, systemPrompt, prompt string) (string, error) {
 	body, err := json.Marshal(map[string]any{
-		"model": groqModel,
+		"model": g.model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": prompt},

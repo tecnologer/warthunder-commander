@@ -30,6 +30,7 @@ type Speaker struct {
 	languageID int
 	dir        string
 	volume     int
+	speed      float64
 }
 
 type createRequest struct {
@@ -125,7 +126,7 @@ func ListVoices(ctx context.Context, apiKey, language string) ([]VoiceEntry, err
 // New constructs a Speaker by resolving the voice and language names to their
 // numeric CAMB.AI IDs. Returns an error if either cannot be resolved or if
 // the API key is missing.
-func New(apiKey, voice, language, dir string, volume int) (*Speaker, error) {
+func New(apiKey, voice, language, dir string, volume int, speed float64) (*Speaker, error) {
 	ctx := context.Background()
 
 	langID, err := resolveLanguage(ctx, apiKey, language)
@@ -144,6 +145,7 @@ func New(apiKey, voice, language, dir string, volume int) (*Speaker, error) {
 		languageID: langID,
 		dir:        dir,
 		volume:     volume,
+		speed:      speed,
 	}, nil
 }
 
@@ -286,7 +288,7 @@ func (c *Speaker) Speak(msg string) error {
 		}
 	}
 
-	if err := player.PlayFile(path, c.volume); err != nil {
+	if err := player.PlayFile(path, c.volume, c.speed); err != nil {
 		return fmt.Errorf("camb: play: %w", err)
 	}
 

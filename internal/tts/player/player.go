@@ -11,19 +11,20 @@ import (
 )
 
 // PlayFile plays an MP3 via an available audio player at the given volume
-// (0–200, 100=normal), blocking until done.
-func PlayFile(path string, volume int) error {
+// (0–200, 100=normal) and speed (0.25–4.0, 1.0=normal), blocking until done.
+func PlayFile(path string, volume int, speed float64) error {
 	vol := strconv.Itoa(volume)
+	spd := strconv.FormatFloat(speed, 'f', -1, 64)
 
 	// Try common cross-platform players first.
 	players := []struct {
 		name string
 		args []string
 	}{
-		{"mpv", []string{"--really-quiet", "--volume=" + vol, path}},
-		{"mplayer", []string{"-really-quiet", "-volume", vol, path}},
-		{"ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", path}},
-		{"vlc", []string{"--intf", "dummy", "--play-and-exit", path}},
+		{"mpv", []string{"--really-quiet", "--volume=" + vol, "--speed=" + spd, path}},
+		{"mplayer", []string{"-really-quiet", "-volume", vol, "-speed", spd, path}},
+		{"ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "atempo=" + spd, path}},
+		{"vlc", []string{"--intf", "dummy", "--play-and-exit", "--rate=" + spd, path}},
 	}
 	for _, p := range players {
 		if bin, err := exec.LookPath(p.name); err == nil {

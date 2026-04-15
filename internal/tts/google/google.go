@@ -19,12 +19,14 @@ type Speaker struct {
 	language string
 	dir      string
 	volume   int
+	speed    float64
 }
 
 // New returns a Speaker for the given language (BCP-47, e.g. "es") that
-// caches audio files under dir at the given volume (0–200, 100=normal).
-func New(language, dir string, volume int) *Speaker {
-	return &Speaker{language: language, dir: dir, volume: volume}
+// caches audio files under dir at the given volume (0–200, 100=normal) and
+// speed (0.25–4.0, 1.0=normal).
+func New(language, dir string, volume int, speed float64) *Speaker {
+	return &Speaker{language: language, dir: dir, volume: volume, speed: speed}
 }
 
 // Speak synthesises msg and plays it, blocking until done.
@@ -42,7 +44,7 @@ func (g *Speaker) Speak(msg string) error {
 		}
 	}
 
-	if err := player.PlayFile(path, g.volume); err != nil {
+	if err := player.PlayFile(path, g.volume, g.speed); err != nil {
 		return fmt.Errorf("google-tts: play: %w", err)
 	}
 
