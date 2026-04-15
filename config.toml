@@ -3,7 +3,27 @@
 
 # UI language for alerts, commander voice, and LLM responses.
 # Valid values: "es" (Spanish, default), "en" (English).
- language = "en"
+language = "en"
+
+# War Thunder local API address. Change this if the game runs on a different
+# host or port (e.g. when using a remote capture setup).
+# wt_source = "http://localhost:8111"
+
+# How often to query the War Thunder local API. Lower values give faster
+# reaction time at the cost of slightly more CPU. Valid Go duration strings:
+# "200ms", "500ms", "1s", etc.
+poll_interval = "100ms"
+
+# How often to send a battlefield summary to the AI commander and collect data
+# for the next report. Also controls the rolling window sent to the LLM.
+# Longer windows give the commander more context; shorter windows react faster.
+commander_interval = "15s"
+
+# Directory for per-match debug log files. Each match creates a timestamped
+# file (e.g. logs/2026-04-14T22-57-26.log) with every alert, commander
+# prompt, and LLM response. Useful for diagnosing incorrect directions.
+# Omit or leave empty to disable.
+# log_dir = "logs"
 
 [ai]
 # AI backend to use for tactical reports.
@@ -13,11 +33,32 @@ engine = "groq"
 # Environment variable that holds the Groq API key.
 groq_env = "GROQ_API_KEY"
 
+# model to use for AI commander. Valid values depend on the engine.
+model = "llama-3.3-70b-versatile"
+
 # The assistant's callsign. This is used to refer to the assistant in conversations.
 callsign = "White Horse"
 
+# Commander output mode. Controls how the AI frames its reports.
+# Valid values:
+#   "warning"     — situational alerts only; describes what is happening, no action verbs (default)
+#   "orders"      — direct tactical orders ("Reposition to B4", "Rotate right!")
+#   "suggestions" — soft recommendations ("Consider pulling back", "You might want to rotate right")
+# mode = "warning"
+
 # Environment variable that holds the Anthropic API key.
 anthropic_env = "ANTHROPIC_API_KEY"
+
+[notifications]
+# Minimum alert priority to speak aloud. Accepts an integer (1–4) or the
+# string "commander". Alerts below this level are silenced.
+#
+#   1             — all alerts + commander (default)
+#   2             — Warning, Critical, and Commander
+#   3             — Critical and Commander only
+#   4 / "commander" — Commander reports only (regular alerts silenced)
+#
+min_priority = 4
 
 [colors]
 # RGB tolerance: how far each channel can be from the reference value
@@ -52,6 +93,10 @@ b = 86
 # Playback volume as a percentage (0–200, default 100).
 # Values above 100 amplify beyond the original recording level.
 volume = 150
+
+# Playback speed multiplier (0.25–4.0, default 1.0).
+# Values below 1.0 slow the voice down; values above 1.0 speed it up.
+# speed = 1.0
 
 # --- Kokoro settings (engine = "kokoro") ---
 # Environment variable that holds the Kokoro API key.

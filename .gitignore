@@ -2,3 +2,4 @@ dist/
 .idea/
 .claude/
 warthunder-commander*
+logs/
