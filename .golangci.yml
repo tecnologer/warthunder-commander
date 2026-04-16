@@ -35,6 +35,24 @@ linters:
       allow-first-in-block: true
       allow-whole-block: false
       branch-max-lines: 2
+    varnamelen:
+      ignore-names:
+        - err
+      # Optional list of variable declarations that should be ignored completely.
+      # Entries must be in one of the following forms (see below for examples):
+      # - for variables, parameters, named return values, method receivers, or type parameters:
+      #   <name> <type>  (<type> can also be a pointer/slice/map/chan/...)
+      # - for constants: const <name>
+      #
+      # Default: []
+      ignore-decls:
+        - c echo.Context
+        - t testing.T
+        - f *foo.Bar
+        - e error
+        - i int
+        - const C
+        - T any
   exclusions:
     generated: lax
     presets:
@@ -63,3 +81,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+        - m map[string]int
