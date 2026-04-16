@@ -126,7 +126,7 @@ func (c *Collector) Summary() *Summary {
 			sum.Player = new(*obj)
 		case obj.IsCaptureZone():
 			sum.Zones = append(sum.Zones, *obj)
-		case obj.Team() == wt.TeamAlly:
+		case obj.IsAlly():
 			sum.Allies = append(sum.Allies, *obj)
 		}
 	}

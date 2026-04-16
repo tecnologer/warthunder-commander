@@ -265,6 +265,7 @@ func (s *assistantState) reset() {
 
 	s.alerter = analyzer.New(s.language)
 	s.col = collector.New(s.commanderInterval)
+	s.cmd.ResetLastAlert()
 	s.lastAlert = time.Time{}
 	s.lastCommand = time.Time{}
 }
@@ -288,7 +289,7 @@ func (s *assistantState) isNewMatch(mapInfo *wt.MapInfo, mode wt.GameMode) bool 
 	return true
 }
 
-func (s *assistantState) pollFrame(speak func(string)) {
+func (s *assistantState) pollFrame(speak func(string)) { //nolint:cyclop
 	objs, err := s.client.MapObjects()
 	if err != nil {
 		notifyMatchEnded(s.inMatch, s.reset)

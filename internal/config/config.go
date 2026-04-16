@@ -240,6 +240,10 @@ type AIConfig struct {
 	// Mode controls how the AI frames its output.
 	// Valid values: "warning" (default), "orders", "suggestions".
 	Mode string `toml:"mode"`
+	// AlertHistoryMax is the number of recent alerts included as context in the
+	// system prompt so the LLM can escalate urgency and vary phrasing.
+	// Default: 3. Set to 0 to disable.
+	AlertHistoryMax int `toml:"alert_history_max"`
 }
 
 // ColorsConfig defines the RGB reference values used to identify each team.

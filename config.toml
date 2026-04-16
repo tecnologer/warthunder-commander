@@ -96,7 +96,7 @@ volume = 150
 
 # Playback speed multiplier (0.25–4.0, default 1.0).
 # Values below 1.0 slow the voice down; values above 1.0 speed it up.
-speed = 1.25
+speed = 1.0
 
 # --- Kokoro settings (engine = "kokoro") ---
 # Environment variable that holds the Kokoro API key.

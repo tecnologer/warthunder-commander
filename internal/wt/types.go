@@ -60,11 +60,40 @@ type MapObject struct {
 
 // MapInfo represents /map_info.json metadata.
 type MapInfo struct {
-	Valid         bool    `json:"valid"`
-	MapName       string  `json:"map_name"`
-	MapSizeX      float64 `json:"map_size_x"`
-	MapSizeY      float64 `json:"map_size_y"`
-	MapGeneration int     `json:"map_generation"`
+	Valid         bool       `json:"valid"`
+	MapGeneration int        `json:"map_generation"`
+	HudType       int        `json:"hud_type"`
+	GridSize      [2]float64 `json:"grid_size"`  // [width, height] of the labelled grid area in map units
+	GridSteps     [2]float64 `json:"grid_steps"` // [col_width, row_height] — size of one grid cell in map units
+	GridZero      [2]float64 `json:"grid_zero"`  // map-space coordinate of the north-west (top-left) grid corner
+	MapMin        [2]float64 `json:"map_min"`    // south-west corner of the map coordinate space
+	MapMax        [2]float64 `json:"map_max"`    // north-east corner of the map coordinate space
+	// Legacy: present in older API versions only.
+	MapName  string  `json:"map_name"`
+	MapSizeX float64 `json:"map_size_x"`
+	MapSizeY float64 `json:"map_size_y"`
+}
+
+// GridDims returns the number of grid columns and rows.
+// Derived as floor(grid_size / grid_steps). Falls back to 8×8 when grid data
+// is unavailable (e.g. game not in a match).
+func (m *MapInfo) GridDims() (int, int) {
+	if m == nil || m.GridSteps[0] <= 0 || m.GridSteps[1] <= 0 {
+		return 8, 8
+	}
+
+	cols := int(m.GridSize[0] / m.GridSteps[0])
+	rows := int(m.GridSize[1] / m.GridSteps[1])
+
+	if cols <= 0 {
+		cols = 8
+	}
+
+	if rows <= 0 {
+		rows = 8
+	}
+
+	return cols, rows
 }
 
 // teamColors holds the active color configuration; set via SetColors.
@@ -104,13 +133,31 @@ func (o *MapObject) Team() Team {
 	}
 }
 
+const (
+	// RespawnBaseTank is the icon for respawn bases in tank battles.
+	RespawnBaseTank = "respawn_base_tank"
+	// RespawnBaseFighter is the icon for respawn bases in air battles.
+	RespawnBaseFighter = "respawn_base_fighter"
+	// CaptureZone is the icon for capture zones in conquest battles.
+	CaptureZone = "capture_zone"
+)
+
 // IsEnemy returns true when the object belongs to the enemy team.
 // Respawn bases share the enemy team color but are map objects, not combatants.
 func (o *MapObject) IsEnemy() bool {
 	return o.Team() == TeamEnemy &&
-		o.Icon != "respawn_base_tank" &&
-		o.Icon != "respawn_base_fighter" &&
-		o.Icon != "capture_zone"
+		o.Icon != RespawnBaseTank &&
+		o.Icon != RespawnBaseFighter &&
+		o.Icon != CaptureZone
+}
+
+// IsAlly returns true when the object is an allied combatant.
+// Respawn bases share the ally team color but are map objects, not combatants.
+func (o *MapObject) IsAlly() bool {
+	return o.Team() == TeamAlly &&
+		o.Icon != RespawnBaseTank &&
+		o.Icon != RespawnBaseFighter &&
+		o.Icon != CaptureZone
 }
 
 // IsPlayer returns true when this object is the local player.
