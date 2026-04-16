@@ -188,7 +188,7 @@ func invokeCommander(
 	mapInfo, _ := client.MapInfo()
 	sum := col.Summary()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is returned to caller
 	go func(ctx context.Context, sum *collector.Summary, info *wt.MapInfo) {
 		report, prompt, err := cmd.Advise(ctx, sum, info)
 
