@@ -59,6 +59,7 @@ type stateResponse struct {
 	Valid    bool   `json:"valid"`
 	GameMode string `json:"game_mode"` // e.g. "arcade", "realistic", "simulator"
 	Type     string `json:"type"`      // alternate field seen in some API versions
+	Level    string `json:"level"`     // mission/map name, present in some API versions
 }
 
 // indicatorsResponse covers the fields we care about from /indicators.
@@ -112,6 +113,23 @@ func (c *Client) MapInfo() (*MapInfo, error) {
 	}
 
 	return &info, nil
+}
+
+// MapName returns the mission/map name for the current match.
+// It checks /map_info.json first (legacy field), then falls back to
+// the level field in /state (present in some API versions).
+// Returns an empty string when neither source provides a name.
+func (c *Client) MapName() string {
+	if info, err := c.MapInfo(); err == nil && info.MapName != "" {
+		return info.MapName
+	}
+
+	var state stateResponse
+	if err := c.get("/state", &state); err == nil && state.Level != "" {
+		return state.Level
+	}
+
+	return ""
 }
 
 func (c *Client) get(path string, dst any) error {

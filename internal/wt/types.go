@@ -8,6 +8,51 @@ import (
 	"github.com/tecnologer/warthunder/internal/config"
 )
 
+// MatchType identifies the mission objective (Domination, Conquest, Battle…).
+type MatchType int
+
+const (
+	// MatchTypeBattle is the default; no capture zones — destroy all enemies.
+	MatchTypeBattle MatchType = iota
+	// MatchTypeConquest has a single capture zone.
+	MatchTypeConquest
+	// MatchTypeDomination has multiple capture zones.
+	MatchTypeDomination
+)
+
+// String returns a human-readable name for the match type.
+func (m MatchType) String() string {
+	switch m { //nolint:exhaustive // default to Battle for unrecognised values
+	case MatchTypeConquest:
+		return "Conquest"
+	case MatchTypeDomination:
+		return "Domination"
+	default:
+		return "Battle"
+	}
+}
+
+// DetectMatchType infers the match type from a snapshot of map objects by
+// counting the number of capture zones visible.
+func DetectMatchType(objs []MapObject) MatchType {
+	zones := 0
+
+	for i := range objs {
+		if objs[i].IsCaptureZone() {
+			zones++
+		}
+	}
+
+	switch {
+	case zones >= 2:
+		return MatchTypeDomination
+	case zones == 1:
+		return MatchTypeConquest
+	default:
+		return MatchTypeBattle
+	}
+}
+
 // GameMode identifies the battle ruleset.
 type GameMode int
 
@@ -19,6 +64,18 @@ const (
 	// GameModeSimulator all enemy-position alerts are disabled.
 	GameModeSimulator
 )
+
+// String returns a human-readable name for the game mode.
+func (m GameMode) String() string {
+	switch m { //nolint:exhaustive // default to Arcade for unrecognised values
+	case GameModeRealistic:
+		return "Realistic"
+	case GameModeSimulator:
+		return "Simulator"
+	default:
+		return "Arcade"
+	}
+}
 
 // ParseGameMode converts an API string to a GameMode.
 // Unrecognised values return GameModeArcade.
