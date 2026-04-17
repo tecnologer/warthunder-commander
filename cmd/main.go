@@ -273,8 +273,8 @@ func (s *assistantState) reset() {
 // isNewMatch returns true when the current map name or game mode differs from
 // what was recorded at match start. When a change is detected it resets state
 // and logs the transition so the caller can start fresh confirmation.
-func (s *assistantState) isNewMatch(mapInfo *wt.MapInfo, mode wt.GameMode) bool {
-	currentMap := mapInfo.MapName
+func (s *assistantState) isNewMatch(_ *wt.MapInfo, mode wt.GameMode) bool {
+	currentMap := s.client.MapName()
 
 	mapChanged := currentMap != "" && currentMap != s.matchMap
 	modeChanged := mode != s.matchMode
@@ -283,7 +283,7 @@ func (s *assistantState) isNewMatch(mapInfo *wt.MapInfo, mode wt.GameMode) bool 
 		return false
 	}
 
-	log.Printf("New match detected (map %q→%q, mode %d→%d). Resetting.", s.matchMap, currentMap, s.matchMode, mode)
+	log.Printf("New match detected (map %q→%q, mode %s→%s). Resetting.", s.matchMap, currentMap, s.matchMode, mode)
 	s.reset()
 
 	return true
@@ -324,13 +324,19 @@ func (s *assistantState) pollFrame(speak func(string)) { //nolint:cyclop
 			return
 		}
 
+		mapName := s.client.MapName()
 		s.inMatch = true
-		s.matchMap = mapInfo.MapName
+		s.matchMap = mapName
 		s.matchMode = mode
 		s.lastCommand = time.Now()
 		s.logger = matchlog.New(s.logDir)
-		s.logger.MatchStart(mapInfo.MapName)
-		log.Printf("Match started. Map: %q, Mode: %d", mapInfo.MapName, mode)
+		s.logger.MatchStart(mapName)
+
+		if mapName != "" {
+			log.Printf("Match started. Map: %q, Mode: %s", mapName, mode)
+		} else {
+			log.Printf("Match started. Mode: %s (map name unavailable)", mode)
+		}
 	} else if s.isNewMatch(mapInfo, mode) {
 		return
 	}
@@ -457,6 +463,10 @@ func openDebugFile(cfg config.Config) (*os.File, error) {
 }
 
 func runAssistant(cfg config.Config, debug bool) error {
+	if !debug {
+		cfg.LogDir = ""
+	}
+
 	logConfig(cfg)
 
 	wt.SetColors(cfg.Colors)

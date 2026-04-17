@@ -109,7 +109,7 @@ speed = 1.0
 #   af_ = American Female  am_ = American Male
 #   bf_ = British Female   bm_ = British Male
 # Examples: af_sky, af_bella, am_adam, bf_emma, bm_daniel
- voice = "bm_lewis"
+ voice = "am_v0adam(2)+bf_alice(1)"
 
 # Model name passed to the Kokoro API.
  model = "kokoro"
