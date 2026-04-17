@@ -55,7 +55,8 @@ type trackedEnemy struct {
 // pendingEnemy holds the data for a newly confirmed enemy waiting to be grouped.
 type pendingEnemy struct {
 	icon string
-	dir  string // movement direction label, empty if stationary
+	dir  string // movement direction label, empty if stationary or overridden by zone
+	zone string // capture zone label if the enemy is near one, empty otherwise
 }
 
 // Analyzer detects tactical events across frames.
@@ -189,9 +190,21 @@ func (a *Analyzer) processFlankAlerts(player *wt.MapObject, enemies []wt.MapObje
 	return best
 }
 
+// nearestZoneLabel returns the label of the capture zone closest to enemy within
+// captureZoneRadius, or an empty string if no such zone exists.
+func (a *Analyzer) nearestZoneLabel(enemy *wt.MapObject, zones []wt.MapObject) string {
+	for idx := range zones {
+		if wt.Dist(enemy, &zones[idx]) <= captureZoneRadius {
+			return a.zoneLabels[zones[idx].PosKey()]
+		}
+	}
+
+	return ""
+}
+
 // updateKnownEnemy refreshes position tracking for an already-tracked enemy
 // and queues it in pendingNew once confirmed on a second frame.
-func (a *Analyzer) updateKnownEnemy(trackIdx int, enemy *wt.MapObject, isClose bool, now time.Time, mode wt.GameMode) {
+func (a *Analyzer) updateKnownEnemy(trackIdx int, enemy *wt.MapObject, isClose bool, now time.Time, mode wt.GameMode, zones []wt.MapObject) {
 	prev := a.tracked[trackIdx].obj
 	a.tracked[trackIdx].prevObj = prev
 	a.tracked[trackIdx].obj = *enemy
@@ -212,6 +225,7 @@ func (a *Analyzer) updateKnownEnemy(trackIdx int, enemy *wt.MapObject, isClose b
 		a.pendingNew = append(a.pendingNew, pendingEnemy{
 			icon: enemy.Icon,
 			dir:  a.movementDir(prev, *enemy),
+			zone: a.nearestZoneLabel(enemy, zones),
 		})
 		a.lastNewEnemy = now
 	}
@@ -219,13 +233,13 @@ func (a *Analyzer) updateKnownEnemy(trackIdx int, enemy *wt.MapObject, isClose b
 
 // updateTrackedEnemies updates position tracking for all current enemies
 // and queues newly confirmed enemies in pendingNew.
-func (a *Analyzer) updateTrackedEnemies(player *wt.MapObject, enemies []wt.MapObject, now time.Time, mode wt.GameMode) {
+func (a *Analyzer) updateTrackedEnemies(player *wt.MapObject, enemies, zones []wt.MapObject, now time.Time, mode wt.GameMode) {
 	for idx := range enemies {
 		enemy := &enemies[idx]
 		isClose := player != nil && wt.Dist(player, enemy) <= flankDistance
 
 		if trackIdx := a.findTracked(enemy); trackIdx >= 0 {
-			a.updateKnownEnemy(trackIdx, enemy, isClose, now, mode)
+			a.updateKnownEnemy(trackIdx, enemy, isClose, now, mode, zones)
 		} else {
 			// First time seeing this enemy — register but wait one frame for direction.
 			a.tracked = append(a.tracked, trackedEnemy{
@@ -323,8 +337,13 @@ func (a *Analyzer) Analyze(objs []wt.MapObject, mode wt.GameMode) *Alert {
 	now := time.Now()
 	a.expireTracked(now)
 
+	// Assign zone labels before tracking so updateTrackedEnemies can look them up.
+	if len(zones) > 0 && len(a.zoneLabels) == 0 {
+		a.zoneLabels = assignZoneLabels(zones)
+	}
+
 	best := a.processFlankAlerts(player, enemies, now, mode)
-	a.updateTrackedEnemies(player, enemies, now, mode)
+	a.updateTrackedEnemies(player, enemies, zones, now, mode)
 
 	if flushAlert := a.flushPendingAlerts(now); flushAlert != nil {
 		best = highest(best, flushAlert)
@@ -393,9 +412,10 @@ func (a *Analyzer) groupedDetectionMsg() string {
 		if idx > 0 {
 			if idx == len(segments)-1 {
 				builder.WriteString(conjunction)
-			} else {
-				builder.WriteString(", ")
+				continue
 			}
+
+			builder.WriteString(", ")
 		}
 
 		builder.WriteString(seg)
@@ -403,19 +423,45 @@ func (a *Analyzer) groupedDetectionMsg() string {
 
 	builder.WriteString(a.lang.DetectedSuffix(len(a.pendingNew)))
 
-	// Append direction only when every pending enemy shares the same one.
-	commonDir := a.pendingNew[0].dir
-	allSame := commonDir != ""
+	// Prefer zone label when all pending enemies share the same capture zone;
+	// fall back to movement direction when all share the same compass direction.
+	commonZone := a.pendingNew[0].zone
+
+	builder.WriteString(a.groupedDetectionMsgZone(commonZone))
+
+	return builder.String()
+}
+
+func (a *Analyzer) groupedDetectionMsgZone(commonZone string) string {
+	var builder strings.Builder
+
+	allSameZone := commonZone != ""
 
 	for _, pending := range a.pendingNew[1:] {
-		if pending.dir != commonDir {
-			allSame = false
+		if pending.zone != commonZone {
+			allSameZone = false
 
 			break
 		}
 	}
 
-	if allSame {
+	if allSameZone {
+		builder.WriteString(a.lang.AtZoneLabel(commonZone))
+		return builder.String()
+	}
+
+	commonDir := a.pendingNew[0].dir
+	allSameDir := commonDir != ""
+
+	for _, pending := range a.pendingNew[1:] {
+		if pending.dir != commonDir {
+			allSameDir = false
+
+			break
+		}
+	}
+
+	if allSameDir {
 		builder.WriteString(a.lang.MovingLabel(commonDir))
 	}
 
@@ -436,7 +482,7 @@ func (a *Analyzer) findTracked(enemy *wt.MapObject) int {
 
 // movementDir returns the localised compass direction of movement from src to dst,
 // or an empty string when movement is below minMovement.
-// Assumes map coordinates where +x = east and +y = south (y increases downward).
+// Assumes map coordinates where +x = east and +y = north (y increases northward).
 func (a *Analyzer) movementDir(src, dst wt.MapObject) string {
 	return a.lang.MovementDir(dst.X-src.X, dst.Y-src.Y)
 }
@@ -444,17 +490,14 @@ func (a *Analyzer) movementDir(src, dst wt.MapObject) string {
 // relativeAngle returns the bearing of enemy relative to player's heading in degrees.
 // 0° = straight ahead, positive = right, negative = left, ±180° = behind.
 //
-// Coordinate system note: map positions use math convention (y=0 south, y
-// increases north) while the heading vector (DX, DY) uses screen convention
-// (DY > 0 means heading south). The dot and cross products below account for
-// this mismatch by negating the Y component of the heading when projecting
-// onto the map-position offset.
+// Both map positions (X, Y) and the heading vector (DX, DY) use mathematical
+// convention: X increases east, Y increases north, DY > 0 means heading north.
+// cross > 0 means the enemy is to the right (clockwise from heading).
 func relativeAngle(player, enemy *wt.MapObject) float64 {
 	ex := enemy.X - player.X
 	ey := enemy.Y - player.Y
-	// Convert heading to map convention: map_hy = -DY
-	dot := player.DX*ex - player.DY*ey
-	cross := -player.DY*ex - player.DX*ey
+	dot := player.DX*ex + player.DY*ey
+	cross := player.DY*ex - player.DX*ey
 
 	return math.Atan2(cross, dot) * 180 / math.Pi
 }

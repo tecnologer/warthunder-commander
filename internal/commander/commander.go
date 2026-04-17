@@ -184,7 +184,7 @@ func (c *Commander) formattedHistory() string {
 //
 // Coordinate conventions (confirmed from API data):
 //   - Positions (X, Y): Y=0 at south edge, increases north (mathematical convention).
-//   - Headings (DX, DY): DY<0 = north (screen convention — independent axis).
+//   - Headings (DX, DY): DY>0 = north (same mathematical convention as positions).
 //   - GridZero: map-space coordinate of the north-west (top-left) grid corner.
 //   - GridSteps: size of one grid cell in map-space units.
 //   - Columns A, B, C… increase going east (positive X).
@@ -275,11 +275,14 @@ func (c *Commander) buildPrompt(sum *collector.Summary, mapInfo *wt.MapInfo) str
 		builder.WriteString(phrases.MapPrefix + mapInfo.MapName + "\n")
 	}
 
+	fmt.Fprintf(&builder, phrases.MatchTypeFmt, sum.MatchType)
+
 	windowSecs := int(sum.WindowEnd.Sub(sum.WindowStart).Seconds())
 	fmt.Fprintf(&builder, phrases.SummaryFmt, windowSecs)
 
 	if sum.Player != nil {
-		bearing := math.Mod(math.Atan2(sum.Player.DY, sum.Player.DX)*180/math.Pi+90+360, 360)
+		// DY > 0 = north (math convention); negate before atan2 to get compass bearing.
+		bearing := math.Mod(math.Atan2(-sum.Player.DY, sum.Player.DX)*180/math.Pi+90+360, 360)
 		heading := c.lang.CompassDir(bearing)
 		fmt.Fprintf(&builder, phrases.PlayerFmt, gridRef(sum.Player.X, sum.Player.Y, mapInfo), heading)
 	} else {
@@ -413,26 +416,20 @@ func classifyFlankThreat(track collector.EnemyTrack, player *wt.MapObject) strin
 		return ""
 	}
 
-	// Enemy movement vector over the collection window.
-	mdx, mdy := track.Displacement()
-
-	// Vector from the enemy's last position toward the player.
-	epx := player.X - track.Last.X
-	epy := player.Y - track.Last.Y
-
-	// Positive dot product means the enemy is moving toward the player.
-	if mdx*epx+mdy*epy <= 0 {
+	// Use distance change over the window to determine approach direction.
+	// This is more robust than a dot-product check, which can be falsely positive
+	// when diagonal movement has a small converging component in one axis while
+	// the dominant motion is away from the player.
+	if wt.Dist(&track.Last, player) >= wt.Dist(&track.First, player) {
 		return "moving away"
 	}
 
 	// Classify the approach direction relative to the player's heading.
-	// Uses the same cross/dot projection as relativeAngle() in analyzer.go:
-	// heading (DX, DY) is in screen convention; position offsets are in map
-	// convention — the formula accounts for the y-axis mismatch.
+	// Both positions and heading use math convention (DY > 0 = north).
 	ex := track.Last.X - player.X
 	ey := track.Last.Y - player.Y
-	dot := player.DX*ex - player.DY*ey
-	cross := -player.DY*ex - player.DX*ey
+	dot := player.DX*ex + player.DY*ey
+	cross := player.DY*ex - player.DX*ey
 	angle := math.Atan2(cross, dot) * 180 / math.Pi
 
 	switch {
@@ -470,13 +467,12 @@ func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phr
 // relativeDir returns the enemy's bearing relative to the player's heading as
 // a localised label suitable for LLM prompts.
 // For English it returns a clock-position string ("twelve o'clock", "three o'clock"…).
-//
-// See relativeAngle in analyzer.go for the coordinate-system explanation.
+// Uses math convention: DY > 0 = north, consistent with relativeAngle in analyzer.go.
 func (c *Commander) relativeDir(player, enemy *wt.MapObject) string {
 	ex := enemy.X - player.X
 	ey := enemy.Y - player.Y
-	dot := player.DX*ex - player.DY*ey
-	cross := -player.DY*ex - player.DX*ey
+	dot := player.DX*ex + player.DY*ey
+	cross := player.DY*ex - player.DX*ey
 	angle := math.Atan2(cross, dot) * 180 / math.Pi
 
 	return c.lang.PromptRelativeDir(angle)

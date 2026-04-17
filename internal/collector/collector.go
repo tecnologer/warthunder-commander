@@ -64,6 +64,7 @@ type Summary struct {
 	Allies      []wt.MapObject // non-squad allies from the most recent frame
 	Squad       []SquadTrack   // squad members tracked over the window
 	Zones       []wt.MapObject // capture zones from the most recent frame
+	MatchType   wt.MatchType   // inferred from zone count in the most recent frame
 	WindowStart time.Time
 	WindowEnd   time.Time
 }
@@ -133,6 +134,7 @@ func (c *Collector) Summary() *Summary {
 
 	sum.Enemies = buildTracks(frames)
 	sum.Squad = buildSquadTracks(frames)
+	sum.MatchType = wt.DetectMatchType(last.Objects)
 
 	return sum
 }

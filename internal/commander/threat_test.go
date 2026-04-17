@@ -8,9 +8,9 @@ import (
 )
 
 // playerNorth is a player at map centre facing north.
-// DX=0, DY=-1 uses screen convention (DY < 0 = north) as documented in
-// relativeAngle() in analyzer.go.
-var playerNorth = wt.MapObject{X: 0.5, Y: 0.5, DX: 0, DY: -1} //nolint:gochecknoglobals
+// DX=0, DY=+1 uses math convention (DY > 0 = north), matching the WT API and
+// the relativeAngle() convention in analyzer.go.
+var playerNorth = wt.MapObject{X: 0.5, Y: 0.5, DX: 0, DY: 1} //nolint:gochecknoglobals
 
 func TestClassifyFlankThreat(t *testing.T) { //nolint:funlen
 	t.Parallel()
