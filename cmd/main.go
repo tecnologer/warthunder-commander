@@ -30,7 +30,7 @@ const (
 )
 
 func main() {
-	cfg, err := config.Load("config.toml")
+	cfg, err := config.LoadAuto()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}

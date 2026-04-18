@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -288,6 +289,28 @@ func defaults() Config {
 			MinPriority: 1,
 		},
 	}
+}
+
+// configFileNames lists the TOML file names searched in order by LoadAuto.
+var configFileNames = []string{"config.toml", "warthunder-commander.toml"}
+
+// LoadAuto searches for a config file next to the running executable, trying
+// each name in configFileNames in order. Falls back to the working directory
+// when the executable path cannot be resolved. Missing file is not an error.
+func LoadAuto() (Config, error) {
+	dir := "."
+	if exe, err := os.Executable(); err == nil {
+		dir = filepath.Dir(exe)
+	}
+
+	for _, name := range configFileNames {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return Load(path)
+		}
+	}
+
+	return Load(filepath.Join(dir, configFileNames[0]))
 }
 
 // Load reads config.toml from path. Missing file is not an error — defaults
