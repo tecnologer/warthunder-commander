@@ -86,7 +86,35 @@ docker run --gpus all -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-gpu:latest
 ```
 
 Si el acceso a la GPU no está disponible, usa la imagen CPU como alternativa —
-la calidad es idéntica, solo difiere la velocidad.
+la calidad es idéntica, solo difiere la velocidad — o intenta construir una imagen
+personalizada con la solución alternativa que se describe a continuación.
+
+#### GPU Blackwell
+
+La imagen Docker de Kokoro incluye PyTorch compilado para CUDA 12.4, que no
+incorpora soporte para la arquitectura Blackwell de NVIDIA (SM 120). Si tienes
+una GPU RTX serie 50, el contenedor fallará al iniciar con:
+
+```shell
+CUDA error: no kernel image is available for execution on the device
+```
+
+##### Solución alternativa
+
+El `Dockerfile` incluido reconstruye la imagen con una versión de PyTorch
+compatible con Blackwell (CUDA 12.8).
+
+Construye la imagen:
+
+```bash
+docker build -t kokoro-blackwell .
+```
+
+Ejecuta el contenedor:
+
+```bash
+docker run --gpus all -p 8880:8880 kokoro-blackwell
+```
 
 ### 2. `config.toml`
 
@@ -186,6 +214,22 @@ Ejemplos:
 
 Ejecuta el servidor local y llama a `GET /v1/voices` para listar todas las voces
 disponibles.
+
+### Combinaciones de voces
+
+Kokoro permite mezclar varias voces uniéndolas con `+` y opcionalmente asignando un peso a cada una con un número entre paréntesis:
+
+```
+am_v0adam(2)+bf_alice(1)
+```
+
+El número controla el peso relativo de cada voz. Un peso mayor significa que esa voz tiene más influencia en el resultado. Puedes combinar tantas voces como quieras.
+
+Para explorar y escuchar las voces disponibles de forma interactiva, abre la interfaz web que incluye el servidor local:
+
+```
+http://localhost:8880/web
+```
 
 ---
 
