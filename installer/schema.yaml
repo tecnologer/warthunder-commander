@@ -1,0 +1,239 @@
+# schema.yaml — installer config fields for warthunder-commander.
+# Ship this file alongside the setup binary, or embed it with //go:embed.
+
+app_name: warthunder-commander
+github_repo: tecnologer/warthunder-commander
+binary_name: warthunder-commander
+
+fields:
+  # ── General ───────────────────────────────────────────────────────────────
+  - key: language
+    label: "Language"
+    description: "UI language for alerts, commander voice, and LLM responses"
+    type: select
+    options:
+      - es
+      - en
+    default: "es"
+    required: true
+
+  - key: poll_interval
+    label: "Poll Interval"
+    description: "How often to query the War Thunder API (e.g. 100ms, 500ms, 1s)"
+    type: text
+    default: "500ms"
+    required: true
+
+  - key: commander_interval
+    label: "Commander Interval"
+    description: "How often to send a battlefield summary to the AI commander (e.g. 15s, 30s)"
+    type: text
+    default: "30s"
+    required: true
+
+  - key: wt_source
+    label: "War Thunder API URL"
+    description: "Base URL of the War Thunder local HTTP API"
+    type: text
+    default: "http://localhost:8111"
+    required: true
+
+  # ── Colors ────────────────────────────────────────────────────────────────
+  - key: colors.player.r
+    label: "Player Color R"
+    description: "Red channel of the player icon color (0–255)"
+    type: text
+    default: "250"
+    required: false
+
+  - key: colors.player.g
+    label: "Player Color G"
+    description: "Green channel of the player icon color (0–255)"
+    type: text
+    default: "200"
+    required: false
+
+  - key: colors.player.b
+    label: "Player Color B"
+    description: "Blue channel of the player icon color (0–255)"
+    type: text
+    default: "30"
+    required: false
+
+  - key: colors.ally.r
+    label: "Ally Color R"
+    description: "Red channel of the ally icon color (0–255)"
+    type: text
+    default: "23"
+    required: false
+
+  - key: colors.ally.g
+    label: "Ally Color G"
+    description: "Green channel of the ally icon color (0–255)"
+    type: text
+    default: "77"
+    required: false
+
+  - key: colors.ally.b
+    label: "Ally Color B"
+    description: "Blue channel of the ally icon color (0–255)"
+    type: text
+    default: "255"
+    required: false
+
+  - key: colors.enemy.r
+    label: "Enemy Color R"
+    description: "Red channel of the enemy icon color (0–255)"
+    type: text
+    default: "250"
+    required: false
+
+  - key: colors.enemy.g
+    label: "Enemy Color G"
+    description: "Green channel of the enemy icon color (0–255)"
+    type: text
+    default: "12"
+    required: false
+
+  - key: colors.enemy.b
+    label: "Enemy Color B"
+    description: "Blue channel of the enemy icon color (0–255)"
+    type: text
+    default: "0"
+    required: false
+
+  - key: colors.squad.r
+    label: "Squad Color R"
+    description: "Red channel of the squad icon color (0–255)"
+    type: text
+    default: "103"
+    required: false
+
+  - key: colors.squad.g
+    label: "Squad Color G"
+    description: "Green channel of the squad icon color (0–255)"
+    type: text
+    default: "215"
+    required: false
+
+  - key: colors.squad.b
+    label: "Squad Color B"
+    description: "Blue channel of the squad icon color (0–255)"
+    type: text
+    default: "86"
+    required: false
+
+  # ── AI ────────────────────────────────────────────────────────────────────
+  - key: ai.engine
+    label: "AI Engine"
+    description: "AI backend to use for tactical reports"
+    type: select
+    options:
+      - groq
+      - anthropic
+    default: "groq"
+    required: true
+
+  - key: ai.groq_env
+    label: "Groq API Key Env Var"
+    description: "Name of the environment variable that holds the Groq API key"
+    type: text
+    default: "GROQ_API_KEY"
+    required: false
+    show_if:
+      key: ai.engine
+      values: [groq]
+
+  - key: ai.anthropic_env
+    label: "Anthropic API Key Env Var"
+    description: "Name of the environment variable that holds the Anthropic API key"
+    type: text
+    default: "ANTHROPIC_API_KEY"
+    required: false
+    show_if:
+      key: ai.engine
+      values: [anthropic]
+
+  - key: ai.model
+    label: "AI Model"
+    description: "LLM model name (leave blank to use the engine default)"
+    type: text
+    default: ""
+    required: false
+
+  - key: ai.callsign
+    label: "Callsign"
+    description: "How the AI commander addresses you (max 3 words, 24 chars)"
+    type: text
+    default: "Bronco"
+    required: false
+
+  - key: ai.mode
+    label: "Commander Mode"
+    description: "How the AI frames its tactical reports"
+    type: select
+    options:
+      - warning
+      - orders
+      - suggestions
+    default: "warning"
+    required: true
+
+  # ── Notifications ─────────────────────────────────────────────────────────
+  - key: notifications.min_priority
+    label: "Minimum Alert Priority"
+    description: "Lowest alert level spoken aloud: 1=all, 2=warning+, 3=critical+, 4=commander only"
+    type: select
+    options:
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+    default: "1"
+    required: true
+
+  # ── TTS ───────────────────────────────────────────────────────────────────
+  - key: tts.engine
+    label: "TTS Engine"
+    description: "Text-to-speech backend"
+    type: select
+    options:
+      - google-tts
+      - kokoro
+      - camb
+    default: "google-tts"
+    required: true
+
+  - key: tts.voice
+    label: "TTS Voice"
+    description: "Voice identifier (e.g. am_adam for Kokoro, numeric ID for CAMB.AI)"
+    type: text
+    default: ""
+    required: false
+    show_if:
+      key: tts.engine
+      values: [kokoro, camb]
+
+  - key: tts.volume
+    label: "TTS Volume"
+    description: "Playback volume as a percentage (0–200, default 100)"
+    type: text
+    default: "100"
+    required: false
+
+  - key: tts.speed
+    label: "TTS Speed"
+    description: "Playback speed multiplier (0.25–4.0, default 1.0)"
+    type: text
+    default: "1.0"
+    required: false
+
+  - key: tts.base_url
+    label: "Kokoro Base URL"
+    description: "Base URL of the Kokoro HTTP API"
+    type: text
+    default: "http://localhost:8880"
+    required: false
+    show_if:
+      key: tts.engine
+      values: [kokoro]
