@@ -149,6 +149,10 @@ func (c *TTSConfig) Validate() error {
 		return fmt.Errorf("tts.speed %.2f is out of range; must be between 0.25 and 4.0", c.Speed)
 	}
 
+	if c.Engine == EngineKokoro && c.Model == "" {
+		c.Model = "kokoro"
+	}
+
 	if c.Engine == EngineCamb {
 		return c.validateCamb()
 	}

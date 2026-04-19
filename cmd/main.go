@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +32,61 @@ const (
 	minConfirmFrames = 6 // 3 s at 500 ms — avoids reacting to transient loading states
 )
 
+// isVersionFlag reports whether the user invoked the binary with --version or -v.
+func isVersionFlag() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "--version" || arg == "-v" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// loadDotEnv looks for a .env file next to the running binary and sets any
+// KEY=VALUE pairs found there as environment variables (skipping keys already set).
+func loadDotEnv() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	path := filepath.Join(filepath.Dir(exe), ".env")
+
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	log.Printf("loading env from %s", path)
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, value)
+		}
+	}
+}
+
 func main() {
+	if !isVersionFlag() {
+		loadDotEnv()
+	}
+
 	cfg, err := config.LoadAuto()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -472,6 +529,14 @@ func runAssistant(cfg config.Config, debug bool) error {
 	wt.SetColors(cfg.Colors)
 
 	state := newAssistantState(cfg)
+
+	if state.cmd == nil && int(cfg.Notifications.MinPriority) >= analyzer.PriorityCommander {
+		const red = "\033[31m"
+		const reset = "\033[0m"
+		fmt.Fprintf(os.Stderr, "%sERROR: min_priority is set to %d (commander only) but no AI API key is configured — no alerts will be delivered.%s\n",
+			red, cfg.Notifications.MinPriority, reset)
+		return cli.Exit("", 1)
+	}
 
 	if debug {
 		debugFile, err := openDebugFile(cfg)

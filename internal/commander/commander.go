@@ -60,11 +60,18 @@ func New(aiCfg config.AIConfig, language lang.Language, commanderInterval time.D
 		return nil
 	}
 
+	model := aiCfg.Model
 	var llm backend
 	if aiCfg.Engine == config.AIEngineAnthropic {
-		llm = newAnthropicBackend(aiCfg.Model)
+		if model == "" {
+			model = config.DefaultAnthropicModel
+		}
+		llm = newAnthropicBackend(model)
 	} else {
-		llm = newGroqBackend(aiCfg.GroqEnv, aiCfg.Model)
+		if model == "" {
+			model = config.DefaultGroqModel
+		}
+		llm = newGroqBackend(aiCfg.GroqEnv, model)
 	}
 
 	callsign := aiCfg.Callsign
