@@ -12,6 +12,7 @@ type msgDownloadDone struct {
 type msgInstallDone struct {
 	binaryPath string
 	configPath string
+	envPath    string
 }
 
 type msgErr struct {

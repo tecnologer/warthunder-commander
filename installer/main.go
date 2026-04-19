@@ -20,9 +20,7 @@ var version = "dev"
 func main() {
 	flag.Parse()
 
-	var (
-		err error
-	)
+	var err error
 
 	data, readErr := embeddedFS.ReadFile("schema.yaml")
 	if readErr != nil {

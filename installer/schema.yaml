@@ -140,6 +140,7 @@ fields:
     type: text
     default: "GROQ_API_KEY"
     required: false
+    env_var: true
     show_if:
       key: ai.engine
       values: [groq]
@@ -150,6 +151,7 @@ fields:
     type: text
     default: "ANTHROPIC_API_KEY"
     required: false
+    env_var: true
     show_if:
       key: ai.engine
       values: [anthropic]
@@ -182,13 +184,18 @@ fields:
   # ── Notifications ─────────────────────────────────────────────────────────
   - key: notifications.min_priority
     label: "Minimum Alert Priority"
-    description: "Lowest alert level spoken aloud: 1=all, 2=warning+, 3=critical+, 4=commander only"
+    description: "1 Info = all alerts  •  2 Warning = skip info  •  3 Critical = enemies only  •  4 Commander = AI reports only"
     type: select
     options:
       - "1"
       - "2"
       - "3"
       - "4"
+    option_labels:
+      - "1 – Info"
+      - "2 – Warning"
+      - "3 – Critical"
+      - "4 – Commander only"
     default: "1"
     required: true
 

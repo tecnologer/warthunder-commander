@@ -31,8 +31,10 @@ type Field struct {
 	Type        FieldType `yaml:"type"`         // text | password | bool | select
 	Default     string    `yaml:"default"`      // Pre-filled value
 	Required    bool      `yaml:"required"`     // Validation: cannot be empty
-	Options     []string  `yaml:"options"`      // Only for type: select
+	Options      []string  `yaml:"options"`       // Only for type: select
+	OptionLabels []string  `yaml:"option_labels"` // Human-readable labels parallel to Options
 	ShowIf      *ShowIf   `yaml:"show_if"`      // Optional: hide field unless condition is met
+	EnvVar      bool      `yaml:"env_var"`      // true when this field's value is an env-var name; wizard will offer to set its value and write it to .env
 }
 
 // Schema is the top-level structure of schema.yaml.

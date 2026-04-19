@@ -2,6 +2,7 @@ package installer
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -156,6 +158,14 @@ func InstallBinary(srcPath, destDir, binaryName string) (string, error) {
 		return destPath, nil
 	}
 
+	if isZip(srcPath) {
+		src.Close()
+		if err := extractBinaryFromZip(srcPath, dst, name); err != nil {
+			return "", err
+		}
+		return destPath, nil
+	}
+
 	if _, err := io.Copy(dst, src); err != nil {
 		return "", fmt.Errorf("copying binary: %w", err)
 	}
@@ -171,6 +181,40 @@ func isGzip(path string) bool {
 	magic := make([]byte, 2)
 	n, _ := f.Read(magic)
 	return n == 2 && magic[0] == 0x1f && magic[1] == 0x8b
+}
+
+func isZip(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	magic := make([]byte, 4)
+	n, _ := f.Read(magic)
+	return n == 4 && magic[0] == 0x50 && magic[1] == 0x4b && magic[2] == 0x03 && magic[3] == 0x04
+}
+
+func extractBinaryFromZip(srcPath string, dst io.Writer, binaryName string) error {
+	zr, err := zip.OpenReader(srcPath)
+	if err != nil {
+		return fmt.Errorf("opening zip: %w", err)
+	}
+	defer zr.Close()
+
+	for _, f := range zr.File {
+		if filepath.Base(f.Name) == binaryName {
+			rc, err := f.Open()
+			if err != nil {
+				return fmt.Errorf("opening zip entry: %w", err)
+			}
+			defer rc.Close()
+			if _, err := io.Copy(dst, rc); err != nil {
+				return fmt.Errorf("extracting binary from zip: %w", err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("binary %q not found in zip archive", binaryName)
 }
 
 func extractBinaryFromTarGz(r io.Reader, dst io.Writer, binaryName string) error {
@@ -200,6 +244,34 @@ func extractBinaryFromTarGz(r io.Reader, dst io.Writer, binaryName string) error
 		}
 	}
 	return fmt.Errorf("binary %q not found in archive", binaryName)
+}
+
+// WriteEnvFile writes a .env file containing the given env var name=value pairs to dir/.env.
+// The file is created with mode 0600 (owner-readable only).
+func WriteEnvFile(dir string, envVars map[string]string) (string, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("creating directory: %w", err)
+	}
+
+	names := make([]string, 0, len(envVars))
+	for k := range envVars {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+
+	var sb strings.Builder
+	for _, name := range names {
+		sb.WriteString(name)
+		sb.WriteString("=")
+		sb.WriteString(envVars[name])
+		sb.WriteString("\n")
+	}
+
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, []byte(sb.String()), 0600); err != nil {
+		return "", fmt.Errorf("writing .env file: %w", err)
+	}
+	return envPath, nil
 }
 
 // WriteConfig writes the provided TOML content to configDir/configFileName.
