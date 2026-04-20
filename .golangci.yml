@@ -51,6 +51,7 @@ linters:
         - f *foo.Bar
         - e error
         - i int
+        - j int
         - const C
         - T any
   exclusions:

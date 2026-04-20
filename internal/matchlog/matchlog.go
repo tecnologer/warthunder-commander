@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/tecnologer/warthunder/internal/analyzer"
 )
 
 // Logger writes match events to a timestamped file in logDir.
@@ -68,6 +70,30 @@ func (l *Logger) Alert(priority int, message string) {
 	}
 
 	l.writef("[ALERT p%d] %s  %s\n", priority, time.Now().Format("15:04:05.000"), message)
+}
+
+// VisibilitySummary logs how long each tracked enemy was visible during the match.
+func (l *Logger) VisibilitySummary(entries []analyzer.VisibilityEntry) {
+	if l == nil || len(entries) == 0 {
+		return
+	}
+
+	l.writef("=== ENEMY VISIBILITY SUMMARY ===\n")
+
+	for _, e := range entries {
+		close := ""
+		if e.WasClose {
+			close = " [close/flank]"
+		}
+
+		l.writef("  %-16s  first=%s  last=%s  duration=%s%s\n",
+			e.Icon,
+			e.FirstSeen.Format("15:04:05"),
+			e.LastSeen.Format("15:04:05"),
+			e.Duration().Round(time.Second),
+			close,
+		)
+	}
 }
 
 // CommanderPrompt logs the prompt sent to the LLM and its response.

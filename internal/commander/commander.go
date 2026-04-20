@@ -22,6 +22,9 @@ import (
 // ErrNoReport is returned by Advise when the LLM has nothing to report.
 var ErrNoReport = errors.New("commander: nothing to report")
 
+// zoneCoverageRadius is the max normalised distance to count a unit as "at" a zone.
+const zoneCoverageRadius = 0.08
+
 // backend sends a system prompt and a user prompt to an LLM and returns the text response.
 type backend interface {
 	complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
@@ -71,6 +74,7 @@ func New(aiCfg config.AIConfig, language lang.Language, commanderInterval time.D
 		if model == "" {
 			model = config.DefaultGroqModel
 		}
+
 		llm = newGroqBackend(aiCfg.GroqEnv, model)
 	}
 
@@ -110,7 +114,7 @@ func (c *Commander) Advise(ctx context.Context, sum *collector.Summary, mapInfo 
 	}
 
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" || strings.EqualFold(strings.Trim(text, "*_~`. "), "silence") {
 		return nil, prompt, ErrNoReport
 	}
 
@@ -180,7 +184,7 @@ func (c *Commander) formattedHistory() string {
 			label = "report"
 		}
 
-		fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, history[i])
+		_, _ = fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, history[i])
 	}
 
 	return strings.TrimRight(builder.String(), "\n")
@@ -324,7 +328,7 @@ func (c *Commander) buildAlliesSection(builder *strings.Builder, phrases lang.Ph
 		line := fmt.Sprintf(phrases.AllyFmt, c.lang.IconName(ally.Icon), gridRef(ally.X, ally.Y, mapInfo))
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.AllyDistFmt, wt.Dist(sum.Player, ally), c.relativeDir(sum.Player, ally))
+			line += fmt.Sprintf(phrases.AllyDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, ally), mapInfo), c.relativeDir(sum.Player, ally))
 		}
 
 		builder.WriteString(line + "\n")
@@ -344,17 +348,16 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 		line := fmt.Sprintf(phrases.SquadMbrFmt, c.lang.IconName(squadTrack.Icon), gridRef(squadTrack.Last.X, squadTrack.Last.Y, mapInfo))
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.SquadDistFmt, wt.Dist(sum.Player, &squadTrack.Last), c.relativeDir(sum.Player, &squadTrack.Last))
+			line += fmt.Sprintf(phrases.SquadDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, &squadTrack.Last), mapInfo), c.relativeDir(sum.Player, &squadTrack.Last))
 		}
 
 		if squadTrack.IsStationary() {
 			line += phrases.Stationary
 		} else {
 			dx, dy := squadTrack.Displacement()
-			dist := math.Hypot(dx, dy)
 			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			dir := c.lang.CompassDir(bearing)
-			line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
+			line += fmt.Sprintf(phrases.MovingFmt, dir, wt.NormDistToMeters(math.Hypot(dx, dy), mapInfo))
 		}
 
 		builder.WriteString(line + "\n")
@@ -386,22 +389,23 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 		line := fmt.Sprintf(phrases.EnemyFmt, c.lang.IconName(enemyTrack.Icon), gridPart)
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.EnemyDistFmt, wt.Dist(sum.Player, &enemyTrack.Last), c.relativeDir(sum.Player, &enemyTrack.Last))
+			line += fmt.Sprintf(phrases.EnemyDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, &enemyTrack.Last), mapInfo), c.relativeDir(sum.Player, &enemyTrack.Last))
 		}
 
 		if stationary {
 			line += phrases.Stationary
 		} else {
 			dx, dy := enemyTrack.Displacement()
-			dist := math.Hypot(dx, dy)
-			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
-			dir := c.lang.CompassDir(bearing)
-			line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
+			movementBearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
+			movementDir := c.lang.CompassDir(movementBearing)
+			line += fmt.Sprintf(phrases.MovingFmt, movementDir, wt.NormDistToMeters(math.Hypot(dx, dy), mapInfo))
 
+			threat := ""
 			if sum.Player != nil {
-				if threat := classifyFlankThreat(enemyTrack, sum.Player); threat != "" {
-					line += " → " + threat
-				}
+				threat = classifyFlankThreat(enemyTrack, sum.Player)
+			}
+			if threat != "" {
+				line += " → " + threat
 			}
 		}
 
@@ -467,7 +471,39 @@ func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phr
 			status = phrases.Contested
 		}
 
-		fmt.Fprintf(builder, phrases.ZoneFmt, string(rune('A'+idx)), status, gridRef(zone.X, zone.Y, mapInfo))
+		line := fmt.Sprintf(phrases.ZoneFmt, string(rune('A'+idx)), status, gridRef(zone.X, zone.Y, mapInfo))
+		line = strings.TrimSuffix(line, "\n")
+
+		friendlies := 0
+		if sum.Player != nil && wt.Dist(sum.Player, &zone) <= zoneCoverageRadius {
+			friendlies++
+		}
+
+		for i := range sum.Allies {
+			if wt.Dist(&sum.Allies[i], &zone) <= zoneCoverageRadius {
+				friendlies++
+			}
+		}
+
+		for _, sq := range sum.Squad {
+			if wt.Dist(&sq.Last, &zone) <= zoneCoverageRadius {
+				friendlies++
+			}
+		}
+
+		enemies := 0
+
+		for _, en := range sum.Enemies {
+			if wt.Dist(&en.Last, &zone) <= zoneCoverageRadius {
+				enemies++
+			}
+		}
+
+		if friendlies > 0 || enemies > 0 {
+			line += fmt.Sprintf(" (friendlies nearby: %d, enemies nearby: %d)", friendlies, enemies)
+		}
+
+		builder.WriteString(line + "\n")
 	}
 }
 
@@ -476,11 +512,13 @@ func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phr
 // For English it returns a clock-position string ("twelve o'clock", "three o'clock"…).
 // Uses math convention: DY > 0 = north, consistent with relativeAngle in analyzer.go.
 func (c *Commander) relativeDir(player, enemy *wt.MapObject) string {
-	ex := enemy.X - player.X
-	ey := enemy.Y - player.Y
-	dot := player.DX*ex + player.DY*ey
-	cross := player.DY*ex - player.DX*ey
-	angle := math.Atan2(cross, dot) * 180 / math.Pi
+	var (
+		ex    = enemy.X - player.X
+		ey    = enemy.Y - player.Y
+		dot   = player.DX*ex + player.DY*ey
+		cross = player.DX*ey - player.DY*ex
+		angle = math.Atan2(cross, dot) * 180 / math.Pi
+	)
 
 	return c.lang.PromptRelativeDir(angle)
 }

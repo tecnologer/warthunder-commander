@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tecnologer/warthunder/internal/tts/player"
+	"github.com/tecnologer/warthunder/internal/utils/closer"
 )
 
 const (
@@ -418,7 +419,7 @@ func (c *Speaker) downloadAudio(audioURL, dest string) error {
 	if err != nil {
 		return fmt.Errorf("camb: create %s: %w", dest, err)
 	}
-	defer audioFile.Close()
+	defer closer.Close(audioFile)
 
 	if _, err := io.Copy(audioFile, resp.Body); err != nil {
 		os.Remove(dest)

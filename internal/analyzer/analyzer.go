@@ -46,10 +46,39 @@ type Alert struct {
 type trackedEnemy struct {
 	obj            wt.MapObject
 	prevObj        wt.MapObject // position from the previous frame, used to compute movement direction
+	firstSeen      time.Time
 	lastSeen       time.Time
 	wasClose       bool
 	confirmed      bool      // false on the first frame; true once seen in a second consecutive frame
 	lastFlankAlert time.Time // zero if not currently in a flank event
+}
+
+// VisibilityEntry records how long a single enemy was visible during a match.
+type VisibilityEntry struct {
+	Icon      string
+	FirstSeen time.Time
+	LastSeen  time.Time
+	WasClose  bool
+}
+
+// Duration returns how long the enemy was visible.
+func (v VisibilityEntry) Duration() time.Duration {
+	return v.LastSeen.Sub(v.FirstSeen)
+}
+
+// VisibilitySummary returns a snapshot of all enemies tracked during the match.
+func (a *Analyzer) VisibilitySummary() []VisibilityEntry {
+	entries := make([]VisibilityEntry, 0, len(a.tracked))
+	for _, t := range a.tracked {
+		entries = append(entries, VisibilityEntry{
+			Icon:      t.obj.Icon,
+			FirstSeen: t.firstSeen,
+			LastSeen:  t.lastSeen,
+			WasClose:  t.wasClose,
+		})
+	}
+
+	return entries
 }
 
 // pendingEnemy holds the data for a newly confirmed enemy waiting to be grouped.
@@ -243,10 +272,11 @@ func (a *Analyzer) updateTrackedEnemies(player *wt.MapObject, enemies, zones []w
 		} else {
 			// First time seeing this enemy — register but wait one frame for direction.
 			a.tracked = append(a.tracked, trackedEnemy{
-				obj:      *enemy,
-				prevObj:  *enemy,
-				lastSeen: now,
-				wasClose: isClose,
+				obj:       *enemy,
+				prevObj:   *enemy,
+				firstSeen: now,
+				lastSeen:  now,
+				wasClose:  isClose,
 			})
 		}
 	}
@@ -301,7 +331,7 @@ func (a *Analyzer) processZoneAlerts(zones, enemies []wt.MapObject, now time.Tim
 		a.zoneAlerts[key] = now
 		label := a.zoneLabels[key]
 		best = highest(best, &Alert{
-			Priority: PriorityWarning,
+			Priority: PriorityInfo,
 			Message:  a.lang.ZoneEnemyAlert(label, a.lang.IconName(enemy.Icon)),
 		})
 	}
@@ -494,10 +524,12 @@ func (a *Analyzer) movementDir(src, dst wt.MapObject) string {
 // convention: X increases east, Y increases north, DY > 0 means heading north.
 // cross > 0 means the enemy is to the right (clockwise from heading).
 func relativeAngle(player, enemy *wt.MapObject) float64 {
-	ex := enemy.X - player.X
-	ey := enemy.Y - player.Y
-	dot := player.DX*ex + player.DY*ey
-	cross := player.DY*ex - player.DX*ey
+	var (
+		ex    = enemy.X - player.X
+		ey    = enemy.Y - player.Y
+		dot   = player.DX*ex + player.DY*ey
+		cross = player.DX*ey - player.DY*ex
+	)
 
 	return math.Atan2(cross, dot) * 180 / math.Pi
 }

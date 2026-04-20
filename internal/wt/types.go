@@ -236,6 +236,28 @@ func Dist(a, b *MapObject) float64 {
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
+// NormDistToMeters converts a normalized distance (as returned by Dist) to metres
+// using the map dimensions from MapInfo. Returns 0 when mapInfo is nil or has no valid dimensions.
+func NormDistToMeters(dist float64, info *MapInfo) int {
+	if info == nil {
+		return 0
+	}
+
+	w := info.MapMax[0] - info.MapMin[0]
+	h := info.MapMax[1] - info.MapMin[1]
+
+	if w <= 0 || h <= 0 {
+		w = info.MapSizeX
+		h = info.MapSizeY
+	}
+
+	if w <= 0 || h <= 0 {
+		return 0
+	}
+
+	return int(math.Round(dist * (w+h) / 2.0))
+}
+
 // colorClose checks whether RGB values are within the given tolerance.
 func colorClose(r, g, b, tr, tg, tb, tol float64) bool {
 	return math.Abs(r-tr) < tol && math.Abs(g-tg) < tol && math.Abs(b-tb) < tol

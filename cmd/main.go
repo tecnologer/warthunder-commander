@@ -20,6 +20,7 @@ import (
 	"github.com/tecnologer/warthunder/internal/matchlog"
 	"github.com/tecnologer/warthunder/internal/tts"
 	"github.com/tecnologer/warthunder/internal/tts/camb"
+	"github.com/tecnologer/warthunder/internal/utils/closer"
 	"github.com/tecnologer/warthunder/internal/wt"
 	"github.com/urfave/cli/v2"
 )
@@ -45,23 +46,32 @@ func isVersionFlag() bool {
 
 // loadDotEnv looks for a .env file next to the running binary and sets any
 // KEY=VALUE pairs found there as environment variables (skipping keys already set).
+// It tries two candidate directories: the resolved executable path (via
+// os.Executable / /proc/self/exe) and the path as invoked (os.Args[0]), which
+// preserves symlinks so the .env placed beside a symlink is also found.
 func loadDotEnv() {
-	exe, err := os.Executable()
-	if err != nil {
+	dirs := candidateDirs()
+
+	var envFile *os.File
+	var path string
+	for _, dir := range dirs {
+		p := filepath.Join(dir, ".env")
+		f, err := os.Open(p)
+		if err == nil {
+			envFile = f
+			path = p
+			break
+		}
+	}
+	if envFile == nil {
 		return
 	}
 
-	path := filepath.Join(filepath.Dir(exe), ".env")
-
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
+	defer closer.Close(envFile)
 
 	log.Printf("loading env from %s", path)
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(envFile)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -80,6 +90,30 @@ func loadDotEnv() {
 			_ = os.Setenv(key, value)
 		}
 	}
+}
+
+// candidateDirs returns the unique directories to search for config/env files.
+// It tries the resolved executable path first (os.Executable), then the
+// invocation path (os.Args[0]) which preserves symlinks.
+func candidateDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			dirs = append(dirs, p)
+		}
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		add(filepath.Dir(exe))
+	}
+	if len(os.Args) > 0 {
+		if abs, err := filepath.Abs(os.Args[0]); err == nil {
+			add(filepath.Dir(abs))
+		}
+	}
+	return dirs
 }
 
 func main() {
@@ -317,6 +351,7 @@ func (s *assistantState) reset() {
 	s.matchMode = 0
 
 	s.cmdCancel()
+	s.logger.VisibilitySummary(s.alerter.VisibilitySummary())
 	s.logger.MatchEnd()
 	s.logger = nil
 
@@ -543,7 +578,7 @@ func runAssistant(cfg config.Config, debug bool) error {
 		if err != nil {
 			return err
 		}
-		defer debugFile.Close()
+		defer closer.Close(debugFile)
 
 		state.client.SetDebugWriter(debugFile)
 	}

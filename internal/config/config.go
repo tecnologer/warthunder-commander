@@ -296,23 +296,55 @@ func defaults() Config {
 }
 
 // configFileNames lists the TOML file names searched in order by LoadAuto.
-var configFileNames = []string{"config.toml", "warthunder-commander.toml"}
+var configFileNames = []string{"config.toml", "warthunder-commander.toml"} //nolint:gochecknoglobals
+
+// candidateDirs returns unique directories to search for config/env files.
+// It tries the resolved executable path (os.Executable) then the invocation
+// path (os.Args[0]) which preserves symlinks, so files placed beside a symlink
+// are also found.
+func candidateDirs() []string {
+	seen := map[string]bool{}
+
+	var dirs []string
+
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			dirs = append(dirs, p)
+		}
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		add(filepath.Dir(exe))
+	}
+
+	if len(os.Args) > 0 {
+		if abs, err := filepath.Abs(os.Args[0]); err == nil {
+			add(filepath.Dir(abs))
+		}
+	}
+
+	if len(dirs) == 0 {
+		dirs = append(dirs, ".")
+	}
+
+	return dirs
+}
 
 // LoadAuto searches for a config file next to the running executable, trying
 // each name in configFileNames in order. Falls back to the working directory
 // when the executable path cannot be resolved. Missing file is not an error.
 func LoadAuto() (Config, error) {
-	dir := "."
-	if exe, err := os.Executable(); err == nil {
-		dir = filepath.Dir(exe)
-	}
-
-	for _, name := range configFileNames {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err == nil {
-			return Load(path)
+	for _, dir := range candidateDirs() {
+		for _, name := range configFileNames {
+			path := filepath.Join(dir, name)
+			if _, err := os.Stat(path); err == nil {
+				return Load(path)
+			}
 		}
 	}
+
+	dir := candidateDirs()[0]
 
 	return Load(filepath.Join(dir, configFileNames[0]))
 }
