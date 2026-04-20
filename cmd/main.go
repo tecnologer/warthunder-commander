@@ -90,6 +90,9 @@ func loadDotEnv() {
 			_ = os.Setenv(key, value)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("error reading env file %s: %v", path, err)
+	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("error reading env file %s: %v", path, err)
