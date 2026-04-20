@@ -114,6 +114,27 @@ func downloadReleaseResponse(ctx context.Context, downloadURL string) (*http.Res
 		return nil, fmt.Errorf("downloading binary: unexpected HTTP status %s", resp.Status)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		bodySnippet, readErr := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if readErr != nil {
+			return "", fmt.Errorf(
+				"downloading binary: unexpected HTTP status %s and failed to read error response: %w",
+				resp.Status,
+				readErr,
+			)
+		}
+
+		snippet := strings.TrimSpace(string(bodySnippet))
+		if snippet != "" {
+			return "", fmt.Errorf(
+				"downloading binary: unexpected HTTP status %s: %s",
+				resp.Status,
+				snippet,
+			)
+		}
+
+		return "", fmt.Errorf("downloading binary: unexpected HTTP status %s", resp.Status)
+	}
 	return resp, nil
 }
 
