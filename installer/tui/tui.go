@@ -57,6 +57,7 @@ type Model struct {
 
 	dlWritten int64
 	dlTotal   int64
+	dlMsgs    <-chan tea.Msg
 
 	errMsg string
 	width  int
@@ -167,14 +168,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dlWritten = msg.written
 		m.dlTotal = msg.total
 
+		next := cmdWaitDownloadMsg(m.dlMsgs)
 		if m.dlTotal > 0 {
 			cmd := m.progress.SetPercent(float64(m.dlWritten) / float64(m.dlTotal))
 
-			return m, cmd
+			return m, tea.Batch(next, cmd)
 		}
 
-		return m, nil
+		return m, next
 	case msgDownloadDone:
+		m.dlMsgs = nil
 		m.tmpBinPath = msg.tmpPath
 		m.step = stepInstalling
 
@@ -187,6 +190,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	case msgErr:
+		m.dlMsgs = nil
 		m.errMsg = msg.err.Error()
 		m.step = stepError
 
@@ -566,7 +570,7 @@ func (m *Model) advanceSection() tea.Cmd {
 
 func (m *Model) enterFirstVisibleSection() {
 	for i := range m.sections {
-		if m.isSectionVisible(i) {
+		if !m.isSectionVisible(i) {
 			continue
 		}
 
@@ -749,18 +753,45 @@ func (m *Model) advanceEnvVar() {
 }
 
 func (m *Model) cmdResolveAndDownload() tea.Cmd {
+	msgs := make(chan tea.Msg, 1)
+	m.dlMsgs = msgs
+
+	return tea.Batch(cmdStartResolveAndDownload(*m, msgs), cmdWaitDownloadMsg(msgs))
+}
+
+func cmdWaitDownloadMsg(msgs <-chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		rel, err := installer.Resolve(m.schema.GithubRepo, m.schema.BinaryName, m.version)
-		if err != nil {
-			return msgErr{err}
+		if msgs == nil {
+			return nil
 		}
 
-		tmpPath, err := installer.DownloadBinary(rel, func(written, total int64) {})
-		if err != nil {
-			return msgErr{err}
-		}
+		return <-msgs
+	}
+}
 
-		return msgDownloadDone{tmpPath: tmpPath}
+func cmdStartResolveAndDownload(m Model, msgs chan<- tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			rel, err := installer.Resolve(m.schema.GithubRepo, m.schema.BinaryName, m.version)
+			if err != nil {
+				msgs <- msgErr{err}
+
+				return
+			}
+
+			tmpPath, err := installer.DownloadBinary(rel, func(written, total int64) {
+				msgs <- msgProgress{written: written, total: total}
+			})
+			if err != nil {
+				msgs <- msgErr{err}
+
+				return
+			}
+
+			msgs <- msgDownloadDone{tmpPath: tmpPath}
+		}()
+
+		return nil
 	}
 }
 
@@ -1122,6 +1153,7 @@ func (m *Model) viewDownloading() string {
 
 	return "\n" + m.spinner.View() +
 		stylePrimary.Render(fmt.Sprintf("  Downloading latest %s release%s…", m.schema.AppName, pct)) +
+		"\n\n  " + m.progress.View() +
 		"\n\n" + styleSubtle.Render("  This may take a moment") + "\n"
 }
 

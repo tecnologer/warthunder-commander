@@ -328,7 +328,9 @@ func (c *Commander) buildAlliesSection(builder *strings.Builder, phrases lang.Ph
 		line := fmt.Sprintf(phrases.AllyFmt, c.lang.IconName(ally.Icon), gridRef(ally.X, ally.Y, mapInfo))
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.AllyDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, ally), mapInfo), c.relativeDir(sum.Player, ally))
+			if dist, ok := wt.DistToMeters(sum.Player, ally, mapInfo); ok {
+				line += fmt.Sprintf(phrases.AllyDistFmt, dist, c.relativeDir(sum.Player, ally))
+			}
 		}
 
 		builder.WriteString(line + "\n")
@@ -348,7 +350,9 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 		line := fmt.Sprintf(phrases.SquadMbrFmt, c.lang.IconName(squadTrack.Icon), gridRef(squadTrack.Last.X, squadTrack.Last.Y, mapInfo))
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.SquadDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, &squadTrack.Last), mapInfo), c.relativeDir(sum.Player, &squadTrack.Last))
+			if dist, ok := wt.DistToMeters(sum.Player, &squadTrack.Last, mapInfo); ok {
+				line += fmt.Sprintf(phrases.SquadDistFmt, dist, c.relativeDir(sum.Player, &squadTrack.Last))
+			}
 		}
 
 		if squadTrack.IsStationary() {
@@ -357,7 +361,9 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 			dx, dy := squadTrack.Displacement()
 			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			dir := c.lang.CompassDir(bearing)
-			line += fmt.Sprintf(phrases.MovingFmt, dir, wt.NormDistToMeters(math.Hypot(dx, dy), mapInfo))
+			if dist, ok := wt.DeltaNormToMeters(dx, dy, mapInfo); ok {
+				line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
+			}
 		}
 
 		builder.WriteString(line + "\n")
@@ -389,7 +395,9 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 		line := fmt.Sprintf(phrases.EnemyFmt, c.lang.IconName(enemyTrack.Icon), gridPart)
 
 		if sum.Player != nil {
-			line += fmt.Sprintf(phrases.EnemyDistFmt, wt.NormDistToMeters(wt.Dist(sum.Player, &enemyTrack.Last), mapInfo), c.relativeDir(sum.Player, &enemyTrack.Last))
+			if dist, ok := wt.DistToMeters(sum.Player, &enemyTrack.Last, mapInfo); ok {
+				line += fmt.Sprintf(phrases.EnemyDistFmt, dist, c.relativeDir(sum.Player, &enemyTrack.Last))
+			}
 		}
 
 		if stationary {
@@ -398,7 +406,9 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 			dx, dy := enemyTrack.Displacement()
 			movementBearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			movementDir := c.lang.CompassDir(movementBearing)
-			line += fmt.Sprintf(phrases.MovingFmt, movementDir, wt.NormDistToMeters(math.Hypot(dx, dy), mapInfo))
+			if dist, ok := wt.DeltaNormToMeters(dx, dy, mapInfo); ok {
+				line += fmt.Sprintf(phrases.MovingFmt, movementDir, dist)
+			}
 
 			threat := ""
 			if sum.Player != nil {
@@ -516,7 +526,7 @@ func (c *Commander) relativeDir(player, enemy *wt.MapObject) string {
 		ex    = enemy.X - player.X
 		ey    = enemy.Y - player.Y
 		dot   = player.DX*ex + player.DY*ey
-		cross = player.DX*ey - player.DY*ex
+		cross = player.DY*ex - player.DX*ey
 		angle = math.Atan2(cross, dot) * 180 / math.Pi
 	)
 

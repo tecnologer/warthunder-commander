@@ -50,7 +50,7 @@ func isVersionFlag() bool {
 // os.Executable / /proc/self/exe) and the path as invoked (os.Args[0]), which
 // preserves symlinks so the .env placed beside a symlink is also found.
 func loadDotEnv() {
-	dirs := candidateDirs()
+	dirs := config.CandidateDirs()
 
 	var envFile *os.File
 	var path string
@@ -90,30 +90,10 @@ func loadDotEnv() {
 			_ = os.Setenv(key, value)
 		}
 	}
-}
 
-// candidateDirs returns the unique directories to search for config/env files.
-// It tries the resolved executable path first (os.Executable), then the
-// invocation path (os.Args[0]) which preserves symlinks.
-func candidateDirs() []string {
-	seen := map[string]bool{}
-	var dirs []string
-	add := func(p string) {
-		if p != "" && !seen[p] {
-			seen[p] = true
-			dirs = append(dirs, p)
-		}
+	if err := scanner.Err(); err != nil {
+		log.Printf("error reading env file %s: %v", path, err)
 	}
-
-	if exe, err := os.Executable(); err == nil {
-		add(filepath.Dir(exe))
-	}
-	if len(os.Args) > 0 {
-		if abs, err := filepath.Abs(os.Args[0]); err == nil {
-			add(filepath.Dir(abs))
-		}
-	}
-	return dirs
 }
 
 func main() {

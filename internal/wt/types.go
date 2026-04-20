@@ -236,26 +236,55 @@ func Dist(a, b *MapObject) float64 {
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
-// NormDistToMeters converts a normalized distance (as returned by Dist) to metres
-// using the map dimensions from MapInfo. Returns 0 when mapInfo is nil or has no valid dimensions.
-func NormDistToMeters(dist float64, info *MapInfo) int {
+func mapDimensions(info *MapInfo) (float64, float64, bool) {
 	if info == nil {
+		return 0, 0, false
+	}
+
+	width := info.MapMax[0] - info.MapMin[0]
+	height := info.MapMax[1] - info.MapMin[1]
+
+	if width <= 0 || height <= 0 {
+		width = info.MapSizeX
+		height = info.MapSizeY
+	}
+
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+
+	return width, height, true
+}
+
+// NormDistToMeters converts a normalized distance to metres using the average map scale.
+// Returns 0 when mapInfo is nil or has no valid dimensions.
+func NormDistToMeters(dist float64, info *MapInfo) int {
+	width, height, ok := mapDimensions(info)
+	if !ok {
 		return 0
 	}
 
-	w := info.MapMax[0] - info.MapMin[0]
-	h := info.MapMax[1] - info.MapMin[1]
+	return int(math.Round(dist * (width + height) / 2.0))
+}
 
-	if w <= 0 || h <= 0 {
-		w = info.MapSizeX
-		h = info.MapSizeY
+// DeltaNormToMeters converts normalized deltas to metres using per-axis map scales.
+// Returns (0, false) when mapInfo is nil or has no valid dimensions.
+func DeltaNormToMeters(dxNorm, dyNorm float64, info *MapInfo) (int, bool) {
+	width, height, ok := mapDimensions(info)
+	if !ok {
+		return 0, false
 	}
 
-	if w <= 0 || h <= 0 {
-		return 0
-	}
+	dxMeters := dxNorm * width
+	dyMeters := dyNorm * height
 
-	return int(math.Round(dist * (w+h) / 2.0))
+	return int(math.Round(math.Hypot(dxMeters, dyMeters))), true
+}
+
+// DistToMeters converts the distance between two objects to metres.
+// Returns (0, false) when mapInfo is nil or has no valid dimensions.
+func DistToMeters(a, b *MapObject, info *MapInfo) (int, bool) {
+	return DeltaNormToMeters(a.X-b.X, a.Y-b.Y, info)
 }
 
 // colorClose checks whether RGB values are within the given tolerance.

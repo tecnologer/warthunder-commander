@@ -528,7 +528,7 @@ func relativeAngle(player, enemy *wt.MapObject) float64 {
 		ex    = enemy.X - player.X
 		ey    = enemy.Y - player.Y
 		dot   = player.DX*ex + player.DY*ey
-		cross = player.DX*ey - player.DY*ex
+		cross = player.DY*ex - player.DX*ey
 	)
 
 	return math.Atan2(cross, dot) * 180 / math.Pi

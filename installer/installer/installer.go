@@ -93,16 +93,32 @@ func downloadReleaseResponse(ctx context.Context, downloadURL string) (*http.Res
 	if resp.StatusCode != http.StatusOK {
 		defer closer.Close(resp.Body)
 
-		body, _ := io.ReadAll(resp.Body)
+		bodySnippet, readErr := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if readErr != nil {
+			return nil, fmt.Errorf(
+				"downloading binary: unexpected HTTP status %s and failed to read error response: %w",
+				resp.Status,
+				readErr,
+			)
+		}
 
-		return nil, fmt.Errorf("download failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		snippet := strings.TrimSpace(string(bodySnippet))
+		if snippet != "" {
+			return nil, fmt.Errorf(
+				"downloading binary: unexpected HTTP status %s: %s",
+				resp.Status,
+				snippet,
+			)
+		}
+
+		return nil, fmt.Errorf("downloading binary: unexpected HTTP status %s", resp.Status)
 	}
 
 	return resp, nil
 }
 
 func writeResponseToTemp(src io.Reader, total int64, progress ProgressFunc) (string, error) {
-	tmp, err := os.CreateTemp("", "mycli-setup-*")
+	tmp, err := os.CreateTemp("", "warthunder-setup-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp file: %w", err)
 	}

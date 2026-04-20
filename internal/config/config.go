@@ -298,11 +298,11 @@ func defaults() Config {
 // configFileNames lists the TOML file names searched in order by LoadAuto.
 var configFileNames = []string{"config.toml", "warthunder-commander.toml"} //nolint:gochecknoglobals
 
-// candidateDirs returns unique directories to search for config/env files.
+// CandidateDirs returns unique directories to search for config/env files.
 // It tries the resolved executable path (os.Executable) then the invocation
 // path (os.Args[0]) which preserves symlinks, so files placed beside a symlink
 // are also found.
-func candidateDirs() []string {
+func CandidateDirs() []string {
 	seen := map[string]bool{}
 
 	var dirs []string
@@ -329,6 +329,10 @@ func candidateDirs() []string {
 	}
 
 	return dirs
+}
+
+func candidateDirs() []string {
+	return CandidateDirs()
 }
 
 // LoadAuto searches for a config file next to the running executable, trying
