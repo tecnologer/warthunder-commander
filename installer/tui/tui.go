@@ -1148,7 +1148,6 @@ func (m *Model) viewDownloading() string {
 	return "\n" + m.spinner.View() +
 		stylePrimary.Render(fmt.Sprintf("  Downloading latest %s release%s…", m.schema.AppName, pct)) +
 		"\n\n  " + m.progress.View() +
-		"\n\n  " + m.progress.View() +
 		"\n\n" + styleSubtle.Render("  This may take a moment") + "\n"
 }
 

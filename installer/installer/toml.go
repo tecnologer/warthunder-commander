@@ -100,7 +100,7 @@ func tomlValue(value string) string {
 	}
 
 	// Escape backslashes and quotes for TOML strings.
-	return quoteTOMLBasicString(v)
+	return quoteTOMLBasicString(value)
 }
 
 func quoteTOMLBasicString(v string) string {
