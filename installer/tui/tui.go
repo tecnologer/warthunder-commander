@@ -574,7 +574,7 @@ func (m *Model) advanceSection() tea.Cmd {
 
 func (m *Model) enterFirstVisibleSection() {
 	for i := range m.sections {
-		if m.isSectionVisible(i) {
+		if !m.isSectionVisible(i) {
 			m.sectionIdx = i
 			m.fieldIdx = 0
 			m.subFocus = 0
