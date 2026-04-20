@@ -4,6 +4,7 @@
 app_name: warthunder-commander
 github_repo: tecnologer/warthunder-commander
 binary_name: warthunder-commander
+install_subdir: wtcommander
 
 fields:
   # ── General ───────────────────────────────────────────────────────────────

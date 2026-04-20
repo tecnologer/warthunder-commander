@@ -35,15 +35,17 @@ func BuildTOML(values map[string]string) string {
 	order := []string{}
 	seen := map[string]bool{}
 
-	for k, v := range values {
-		parts := strings.SplitN(k, ".", 2)
+	for key, value := range values {
+		parts := strings.SplitN(key, ".", 2)
+
 		var section, key string
 		if len(parts) == 2 {
 			section, key = parts[0], parts[1]
 		} else {
 			section, key = "", parts[0]
 		}
-		sections[section] = append(sections[section], entry{section, key, v})
+
+		sections[section] = append(sections[section], entry{section, key, value})
 		if !seen[section] {
 			order = append(order, section)
 			seen[section] = true
@@ -55,9 +57,11 @@ func BuildTOML(values map[string]string) string {
 		if order[i] == "" {
 			return true
 		}
+
 		if order[j] == "" {
 			return false
 		}
+
 		return order[i] < order[j]
 	})
 
@@ -76,6 +80,7 @@ func BuildTOML(values map[string]string) string {
 		for _, e := range entries {
 			fmt.Fprintf(&buf, "%s = %s\n", e.key, tomlValue(e.value))
 		}
+
 		buf.WriteString("\n")
 	}
 
@@ -83,40 +88,49 @@ func BuildTOML(values map[string]string) string {
 }
 
 // tomlValue wraps string values in quotes, passes through booleans and numbers bare.
-func tomlValue(v string) string {
-	switch v {
+func tomlValue(value string) string {
+	switch value {
 	case "true", "false":
-		return v
+		return value
 	}
+
 	// If it looks like an integer or float, emit bare.
-	if isNumeric(v) {
-		return v
+	if isNumeric(value) {
+		return value
 	}
+
 	// Escape backslashes and quotes for TOML strings.
-	v = strings.ReplaceAll(v, `\`, `\\`)
-	v = strings.ReplaceAll(v, `"`, `\"`)
-	return fmt.Sprintf("%q", v)
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+
+	return fmt.Sprintf("%q", value)
 }
 
-func isNumeric(s string) bool {
-	if s == "" {
+func isNumeric(value string) bool {
+	if value == "" {
 		return false
 	}
+
 	dotCount := 0
-	for i, c := range s {
-		if c == '-' && i == 0 {
+
+	for i, char := range value {
+		if char == '-' && i == 0 {
 			continue
 		}
-		if c == '.' {
+
+		if char == '.' {
 			dotCount++
 			if dotCount > 1 {
 				return false
 			}
+
 			continue
 		}
-		if c < '0' || c > '9' {
+
+		if char < '0' || char > '9' {
 			return false
 		}
 	}
+
 	return true
 }
