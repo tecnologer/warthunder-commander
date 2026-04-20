@@ -15,7 +15,12 @@ func Close(c io.Closer) {
 
 	v := reflect.ValueOf(c)
 	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Interface, reflect.Slice:
+	case reflect.Chan,
+		reflect.Func,
+		reflect.Map,
+		reflect.Pointer,
+		reflect.Interface,
+		reflect.Slice:
 		if v.IsNil() {
 			return
 		}

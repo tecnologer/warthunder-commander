@@ -21,6 +21,9 @@ const (
 	rgbColWidth   = 10 // label column for RGB groups
 	inputWidth    = 28 // textinput width for regular fields
 	rgbInputWidth = 5  // textinput width for R/G/B sub-inputs
+
+	// buffer enough queued progress updates to avoid stalling download IO.
+	downloadMsgBufferSize = 128
 )
 
 // Model is the root Bubble Tea model for the installer wizard.
@@ -570,17 +573,15 @@ func (m *Model) advanceSection() tea.Cmd {
 
 func (m *Model) enterFirstVisibleSection() {
 	for i := range m.sections {
-		if !m.isSectionVisible(i) {
-			continue
+		if m.isSectionVisible(i) {
+			m.sectionIdx = i
+			m.fieldIdx = 0
+			m.subFocus = 0
+			m.enterFirstVisibleField()
+			m.refocusSection()
+
+			return
 		}
-
-		m.sectionIdx = i
-		m.fieldIdx = 0
-		m.subFocus = 0
-		m.enterFirstVisibleField()
-		m.refocusSection()
-
-		return
 	}
 
 	m.step = stepConfirm
@@ -753,10 +754,35 @@ func (m *Model) advanceEnvVar() {
 }
 
 func (m *Model) cmdResolveAndDownload() tea.Cmd {
-	msgs := make(chan tea.Msg, 1)
+	msgs := make(chan tea.Msg, downloadMsgBufferSize)
 	m.dlMsgs = msgs
 
-	return tea.Batch(cmdStartResolveAndDownload(*m, msgs), cmdWaitDownloadMsg(msgs))
+	go func() {
+		defer close(msgs)
+
+		rel, err := installer.Resolve(m.schema.GithubRepo, m.schema.BinaryName, m.version)
+		if err != nil {
+			msgs <- msgErr{err}
+
+			return
+		}
+
+		tmpPath, err := installer.DownloadBinary(rel, func(written, total int64) {
+			select {
+			case msgs <- msgProgress{written: written, total: total}:
+			default:
+			}
+		})
+		if err != nil {
+			msgs <- msgErr{err}
+
+			return
+		}
+
+		msgs <- msgDownloadDone{tmpPath: tmpPath}
+	}()
+
+	return cmdWaitDownloadMsg(msgs)
 }
 
 func cmdWaitDownloadMsg(msgs <-chan tea.Msg) tea.Cmd {
@@ -765,33 +791,12 @@ func cmdWaitDownloadMsg(msgs <-chan tea.Msg) tea.Cmd {
 			return nil
 		}
 
-		return <-msgs
-	}
-}
+		msg, ok := <-msgs
+		if !ok {
+			return nil
+		}
 
-func cmdStartResolveAndDownload(m Model, msgs chan<- tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		go func() {
-			rel, err := installer.Resolve(m.schema.GithubRepo, m.schema.BinaryName, m.version)
-			if err != nil {
-				msgs <- msgErr{err}
-
-				return
-			}
-
-			tmpPath, err := installer.DownloadBinary(rel, func(written, total int64) {
-				msgs <- msgProgress{written: written, total: total}
-			})
-			if err != nil {
-				msgs <- msgErr{err}
-
-				return
-			}
-
-			msgs <- msgDownloadDone{tmpPath: tmpPath}
-		}()
-
-		return nil
+		return msg
 	}
 }
 

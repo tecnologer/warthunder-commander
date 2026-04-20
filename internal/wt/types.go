@@ -267,9 +267,9 @@ func NormDistToMeters(dist float64, info *MapInfo) int {
 	return int(math.Round(dist * (width + height) / 2.0))
 }
 
-// DeltaNormToMeters converts normalized deltas to metres using per-axis map scales.
+// NormDeltaDistToMeters converts normalized deltas to a distance in metres using per-axis map scales.
 // Returns (0, false) when mapInfo is nil or has no valid dimensions.
-func DeltaNormToMeters(dxNorm, dyNorm float64, info *MapInfo) (int, bool) {
+func NormDeltaDistToMeters(dxNorm, dyNorm float64, info *MapInfo) (int, bool) {
 	width, height, ok := mapDimensions(info)
 	if !ok {
 		return 0, false
@@ -284,7 +284,7 @@ func DeltaNormToMeters(dxNorm, dyNorm float64, info *MapInfo) (int, bool) {
 // DistToMeters converts the distance between two objects to metres.
 // Returns (0, false) when mapInfo is nil or has no valid dimensions.
 func DistToMeters(a, b *MapObject, info *MapInfo) (int, bool) {
-	return DeltaNormToMeters(a.X-b.X, a.Y-b.Y, info)
+	return NormDeltaDistToMeters(a.X-b.X, a.Y-b.Y, info)
 }
 
 // colorClose checks whether RGB values are within the given tolerance.

@@ -118,7 +118,7 @@ func downloadReleaseResponse(ctx context.Context, downloadURL string) (*http.Res
 }
 
 func writeResponseToTemp(src io.Reader, total int64, progress ProgressFunc) (string, error) {
-	tmp, err := os.CreateTemp("", "warthunder-setup-*")
+	tmp, err := os.CreateTemp("", "warthunder-commander-download-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp file: %w", err)
 	}

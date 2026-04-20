@@ -361,7 +361,7 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 			dx, dy := squadTrack.Displacement()
 			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			dir := c.lang.CompassDir(bearing)
-			if dist, ok := wt.DeltaNormToMeters(dx, dy, mapInfo); ok {
+			if dist, ok := wt.NormDeltaDistToMeters(dx, dy, mapInfo); ok {
 				line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
 			}
 		}
@@ -406,7 +406,7 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 			dx, dy := enemyTrack.Displacement()
 			movementBearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
 			movementDir := c.lang.CompassDir(movementBearing)
-			if dist, ok := wt.DeltaNormToMeters(dx, dy, mapInfo); ok {
+			if dist, ok := wt.NormDeltaDistToMeters(dx, dy, mapInfo); ok {
 				line += fmt.Sprintf(phrases.MovingFmt, movementDir, dist)
 			}
 
