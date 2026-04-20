@@ -100,12 +100,43 @@ func tomlValue(value string) string {
 	}
 
 	// Escape backslashes and quotes for TOML strings.
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-
-	return fmt.Sprintf("%q", value)
+	return quoteTOMLBasicString(v)
 }
 
+func quoteTOMLBasicString(v string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range v {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			if r <= 0x1F || r == 0x7F {
+				if r <= 0xFFFF {
+					fmt.Fprintf(&b, `\u%04X`, r)
+				} else {
+					fmt.Fprintf(&b, `\U%08X`, r)
+				}
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
 func isNumeric(value string) bool {
 	if value == "" {
 		return false
