@@ -55,8 +55,8 @@ func computeSections(fields []schema.Field) []section {
 
 // topLevelKey returns everything before the first dot, or "" for root-level keys.
 func topLevelKey(key string) string {
-	if i := strings.Index(key, "."); i >= 0 {
-		return key[:i]
+	if before, _, ok := strings.Cut(key, "."); ok {
+		return before
 	}
 
 	return ""

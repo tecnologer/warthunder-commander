@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -649,23 +650,11 @@ func (m *Model) isFieldVisible(i int) bool {
 		}
 	}
 
-	for _, value := range field.ShowIf.Values {
-		if value == val {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(field.ShowIf.Values, val)
 }
 
 func (m *Model) isGroupVisible(sec section, gi int) bool {
-	for _, idx := range sec.groups[gi].indices {
-		if m.isFieldVisible(idx) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(sec.groups[gi].indices, m.isFieldVisible)
 }
 
 func (m *Model) isSectionVisible(si int) bool {

@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,7 +177,7 @@ func (c *Commander) formattedHistory() string {
 
 	var builder strings.Builder
 
-	for i := len(history) - 1; i >= 0; i-- {
+	for i, v := range slices.Backward(history) {
 		count := len(history) - i
 
 		label := "reports"
@@ -184,7 +185,7 @@ func (c *Commander) formattedHistory() string {
 			label = "report"
 		}
 
-		_, _ = fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, history[i])
+		_, _ = fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, v)
 	}
 
 	return strings.TrimRight(builder.String(), "\n")
