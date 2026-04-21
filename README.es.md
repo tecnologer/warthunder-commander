@@ -6,51 +6,6 @@ amenazas de flanqueo y zonas de captura en disputa. Cada 30 segundos también
 llama a un LLM (Groq o Anthropic) para entregar un informe táctico de una línea
 por voz.
 
-## Características
-
-- **Detección de flanqueo** — avisa cuando un enemigo se acerca dentro del 15%
-  del ancho del mapa en un ángulo mayor a 90° respecto a tu dirección (prioridad
-  Crítica).
-- **Enemigo detectado** — anuncia nuevos enemigos por tipo de unidad, cantidad y
-  dirección de movimiento. Agrupa detecciones en una ventana de 1 segundo en una
-  sola alerta.
-- **Presión en zona** — se activa cuando una zona de captura está en disputa y
-  hay un enemigo dentro del 8% del ancho del mapa.
-- **Comandante IA** — cada 30 segundos un LLM de Groq o Anthropic lee el
-  resumen del campo de batalla de los últimos 30 segundos y emite un informe
-  táctico breve (≤15 palabras). Tres modos de comandante: `warning` (alertas
-  situacionales), `orders` (comandos tácticos directos) o `suggestions`
-  (recomendaciones suaves).
-- **Conciencia del modo de juego** — Arcade muestra todos los enemigos;
-  Realista solo muestra enemigos activamente detectados por un aliado cercano;
-  Simulador suprime todas las alertas de enemigos.
-- **Seguimiento de enemigos** — rastrea enemigos y miembros del escuadrón entre
-  fotogramas por proximidad, con retención de 30 segundos (60 segundos para
-  contactos cercanos). Evita re-alertar sobre la misma amenaza dentro de una
-  ventana de silencio de 30 segundos.
-- **Filtro de notificaciones** — `min_priority` configurable silencia alertas de
-  baja prioridad (ej. `min_priority = 3` entrega solo alertas Críticas y del
-  Comandante).
-- **Bilingüe** — soporte completo en inglés y español para todas las alertas,
-  voz del comandante y respuestas del LLM.
-- **TTS intercambiable** — Google Translate (gratuito, sin clave), Kokoro (API
-  local compatible con OpenAI) o CAMB.AI.
-- **Caché de audio** — los MP3 sintetizados se almacenan en `/tmp/wt-tts/` y se
-  reutilizan para cadenas idénticas.
-- **Silencioso en reposo** — cuando el juego no está en ejecución, el ciclo
-  opera en silencio sin generar ruido en los logs.
-
-## Requisitos
-
-- Go 1.21+
-- `mplayer` o `mpv` instalado y en `$PATH`
-- War Thunder en ejecución (la API local solo está activa dentro del juego)
-- Para comandante Groq: variable de entorno `GROQ_API_KEY`
-- Para comandante Anthropic: variable de entorno `ANTHROPIC_API_KEY`
-- Para TTS CAMB.AI: variable de entorno `CAMB_API_KEY`
-- Para TTS Kokoro: un servidor Kokoro local en `http://localhost:8880` (o
-  cualquier endpoint `/v1/audio/speech` compatible con OpenAI)
-
 ## Instalación
 
 ### Recomendado: asistente de configuración
@@ -205,6 +160,51 @@ main.go  →  wt.Client.MapObjects()  →  analyzer.Analyze()  →  tts.Speaker.
                                     →  collector.Add()
                                     →  commander.Advise()   ↗
 ```
+
+## Características
+
+- **Detección de flanqueo** — avisa cuando un enemigo se acerca dentro del 15%
+  del ancho del mapa en un ángulo mayor a 90° respecto a tu dirección (prioridad
+  Crítica).
+- **Enemigo detectado** — anuncia nuevos enemigos por tipo de unidad, cantidad y
+  dirección de movimiento. Agrupa detecciones en una ventana de 1 segundo en una
+  sola alerta.
+- **Presión en zona** — se activa cuando una zona de captura está en disputa y
+  hay un enemigo dentro del 8% del ancho del mapa.
+- **Comandante IA** — cada 30 segundos un LLM de Groq o Anthropic lee el
+  resumen del campo de batalla de los últimos 30 segundos y emite un informe
+  táctico breve (≤15 palabras). Tres modos de comandante: `warning` (alertas
+  situacionales), `orders` (comandos tácticos directos) o `suggestions`
+  (recomendaciones suaves).
+- **Conciencia del modo de juego** — Arcade muestra todos los enemigos;
+  Realista solo muestra enemigos activamente detectados por un aliado cercano;
+  Simulador suprime todas las alertas de enemigos.
+- **Seguimiento de enemigos** — rastrea enemigos y miembros del escuadrón entre
+  fotogramas por proximidad, con retención de 30 segundos (60 segundos para
+  contactos cercanos). Evita re-alertar sobre la misma amenaza dentro de una
+  ventana de silencio de 30 segundos.
+- **Filtro de notificaciones** — `min_priority` configurable silencia alertas de
+  baja prioridad (ej. `min_priority = 3` entrega solo alertas Críticas y del
+  Comandante).
+- **Bilingüe** — soporte completo en inglés y español para todas las alertas,
+  voz del comandante y respuestas del LLM.
+- **TTS intercambiable** — Google Translate (gratuito, sin clave), Kokoro (API
+  local compatible con OpenAI) o CAMB.AI.
+- **Caché de audio** — los MP3 sintetizados se almacenan en `/tmp/wt-tts/` y se
+  reutilizan para cadenas idénticas.
+- **Silencioso en reposo** — cuando el juego no está en ejecución, el ciclo
+  opera en silencio sin generar ruido en los logs.
+
+## Requisitos
+
+- Go 1.21+
+- `mplayer` o `mpv` instalado y en `$PATH`
+- War Thunder en ejecución (la API local solo está activa dentro del juego)
+- Para comandante Groq: variable de entorno `GROQ_API_KEY`
+- Para comandante Anthropic: variable de entorno `ANTHROPIC_API_KEY`
+- Para TTS CAMB.AI: variable de entorno `CAMB_API_KEY`
+- Para TTS Kokoro: un servidor Kokoro local en `http://localhost:8880` (o
+  cualquier endpoint `/v1/audio/speech` compatible con OpenAI)
 
 ### Reglas de detección (orden de prioridad)
 

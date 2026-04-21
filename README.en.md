@@ -5,46 +5,6 @@ A real-time combat assistant for War Thunder. It reads the game's local HTTP API
 and contested capture zones. Every 30 seconds it also calls an LLM (Groq or
 Anthropic) to deliver a one-line tactical situation report over voice.
 
-## Features
-
-- **Flank detection** — warns when an enemy closes within 15% of the map width at
-  an angle greater than 90° from your heading (Critical priority).
-- **Enemy spotted** — announces new enemies by unit type, count, and movement
-  direction. Groups detections within a 1-second window into a single alert.
-- **Zone pressure** — fires when a capture zone is contested and an enemy is
-  within 8% of map width of it.
-- **AI commander** — every 30 seconds a Groq or Anthropic LLM reads the last
-  30-second battlefield summary and speaks a short tactical report (≤15 words).
-  Three commander modes: `warning` (situational alerts), `orders` (direct
-  tactical commands), or `suggestions` (soft recommendations).
-- **Game-mode awareness** — Arcade shows all enemies; Realistic only shows
-  enemies actively spotted by a nearby ally; Simulator suppresses all enemy
-  alerts.
-- **Enemy tracking** — tracks enemies and squad members across frames by
-  proximity, with 30-second (60-second for close contacts) retention. Avoids
-  re-alerting on the same ongoing threat within a 30-second silence window.
-- **Notification filter** — configurable `min_priority` silences low-priority
-  alerts (e.g. `min_priority = 3` delivers only Critical and Commander reports).
-- **Bilingual** — full English and Spanish support for all alerts, commander
-  voice, and LLM responses.
-- **Pluggable TTS** — Google Translate (free, no key), Kokoro (local
-  OpenAI-compatible API), or CAMB.AI.
-- **Audio cache** — synthesised MP3s are cached in `/tmp/wt-tts/` and reused for
-  identical strings.
-- **Silent when idle** — when the game is not running the loop skips silently
-  with no log spam.
-
-## Requirements
-
-- Go 1.21+
-- `mplayer` or `mpv` installed and on `$PATH`
-- War Thunder running (the local API is only active in-game)
-- For Groq commander: `GROQ_API_KEY` environment variable
-- For Anthropic commander: `ANTHROPIC_API_KEY` environment variable
-- For CAMB.AI TTS: `CAMB_API_KEY` environment variable
-- For Kokoro TTS: a local Kokoro server at `http://localhost:8880` (or any
-  OpenAI-compatible `/v1/audio/speech` endpoint)
-
 ## Installation
 
 ### Recommended: setup wizard
@@ -198,6 +158,35 @@ main.go  →  wt.Client.MapObjects()  →  analyzer.Analyze()  →  tts.Speaker.
                                     →  commander.Advise()   ↗
 ```
 
+## Features
+
+- **Flank detection** — warns when an enemy closes within 15% of the map width at
+  an angle greater than 90° from your heading (Critical priority).
+- **Enemy spotted** — announces new enemies by unit type, count, and movement
+  direction. Groups detections within a 1-second window into a single alert.
+- **Zone pressure** — fires when a capture zone is contested and an enemy is
+  within 8% of map width of it.
+- **AI commander** — every 30 seconds a Groq or Anthropic LLM reads the last
+  30-second battlefield summary and speaks a short tactical report (≤15 words).
+  Three commander modes: `warning` (situational alerts), `orders` (direct
+  tactical commands), or `suggestions` (soft recommendations).
+- **Game-mode awareness** — Arcade shows all enemies; Realistic only shows
+  enemies actively spotted by a nearby ally; Simulator suppresses all enemy
+  alerts.
+- **Enemy tracking** — tracks enemies and squad members across frames by
+  proximity, with 30-second (60-second for close contacts) retention. Avoids
+  re-alerting on the same ongoing threat within a 30-second silence window.
+- **Notification filter** — configurable `min_priority` silences low-priority
+  alerts (e.g. `min_priority = 3` delivers only Critical and Commander reports).
+- **Bilingual** — full English and Spanish support for all alerts, commander
+  voice, and LLM responses.
+- **Pluggable TTS** — Google Translate (free, no key), Kokoro (local
+  OpenAI-compatible API), or CAMB.AI.
+- **Audio cache** — synthesised MP3s are cached in `/tmp/wt-tts/` and reused for
+  identical strings.
+- **Silent when idle** — when the game is not running the loop skips silently
+  with no log spam.
+
 ### Detection rules (priority order)
 
 1. **Critical** — enemy within 15% of map width at >90° from player heading → flank alert with side.
@@ -211,6 +200,17 @@ At most one alert fires per 4-second cooldown window; highest priority wins.
 Teams are identified by matching the `color[]` RGB array from `map_obj.json`
 against configurable reference colors with a per-channel tolerance (default ±30).
 There is no team ID field in the API.
+
+## Requirements
+
+- Go 1.21+
+- `mplayer` or `mpv` installed and on `$PATH`
+- War Thunder running (the local API is only active in-game)
+- For Groq commander: `GROQ_API_KEY` environment variable
+- For Anthropic commander: `ANTHROPIC_API_KEY` environment variable
+- For CAMB.AI TTS: `CAMB_API_KEY` environment variable
+- For Kokoro TTS: a local Kokoro server at `http://localhost:8880` (or any
+  OpenAI-compatible `/v1/audio/speech` endpoint)
 
 ## Development
 
