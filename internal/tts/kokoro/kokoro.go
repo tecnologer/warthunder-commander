@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/tecnologer/warthunder/internal/tts/player"
+	"github.com/tecnologer/warthunder/internal/utils/closer"
 )
 
 // Speaker synthesises speech via the Kokoro HTTP API and plays it locally.
@@ -102,7 +103,7 @@ func (k *Speaker) fetch(msg, dest string) error {
 	if err != nil {
 		return fmt.Errorf("kokoro: create %s: %w", dest, err)
 	}
-	defer audioFile.Close()
+	defer closer.Close(audioFile)
 
 	if _, err := io.Copy(audioFile, resp.Body); err != nil {
 		os.Remove(dest) // remove partial file on write failure

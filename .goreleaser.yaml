@@ -12,7 +12,6 @@ builds:
     binary: warthunder-commander
     env:
       - CGO_ENABLED=0
-      - VERSION={{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}dev{{ end }}
     goos:
       - linux
       - windows
@@ -20,10 +19,25 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{ .Env.VERSION }}
+      - -s -w -X main.version={{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}
+
+  - id: warthunder-setup
+    main: ./installer/main.go
+    binary: warthunder-setup
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ if .Env.VERSION }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}
 
 archives:
   - id: warthunder-commander
+    ids: [warthunder-commander]
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -31,6 +45,18 @@ archives:
       - goos: windows
         formats:
           - zip
+
+  - id: warthunder-setup
+    ids: [warthunder-setup]
+    formats:
+      - tar.gz
+    name_template: "warthunder-setup_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - installer/schema.yaml
 
 checksum:
   name_template: "checksums.txt"

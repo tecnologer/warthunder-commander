@@ -9,3 +9,8 @@ build:
 
 debug: build
 	 ./warthunder-commander --debug
+
+clear:
+	rm -rf warthunder-commander*
+	rm -rf dist
+	rm -rf logs/*

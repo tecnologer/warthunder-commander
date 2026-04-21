@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/tecnologer/warthunder/internal/matchlog"
 	"github.com/tecnologer/warthunder/internal/tts"
 	"github.com/tecnologer/warthunder/internal/tts/camb"
+	"github.com/tecnologer/warthunder/internal/utils/closer"
 	"github.com/tecnologer/warthunder/internal/wt"
 	"github.com/urfave/cli/v2"
 )
@@ -29,8 +33,78 @@ const (
 	minConfirmFrames = 6 // 3 s at 500 ms — avoids reacting to transient loading states
 )
 
+// isVersionFlag reports whether the user invoked the binary with --version or -v.
+func isVersionFlag() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "--version" || arg == "-v" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// findDotEnvFile searches candidate directories for a .env file and returns the
+// first one found, along with its path. Returns (nil, "") if none exists.
+func findDotEnvFile() (*os.File, string) {
+	for _, dir := range config.CandidateDirs() {
+		p := filepath.Join(dir, ".env")
+
+		f, err := os.Open(p)
+		if err == nil {
+			return f, p
+		}
+	}
+
+	return nil, ""
+}
+
+// loadDotEnv looks for a .env file next to the running binary and sets any
+// KEY=VALUE pairs found there as environment variables (skipping keys already set).
+// It tries two candidate directories: the resolved executable path (via
+// os.Executable / /proc/self/exe) and the path as invoked (os.Args[0]), which
+// preserves symlinks so the .env placed beside a symlink is also found.
+func loadDotEnv() {
+	envFile, path := findDotEnvFile()
+	if envFile == nil {
+		return
+	}
+
+	defer closer.Close(envFile)
+
+	log.Printf("loading env from %s", path)
+
+	scanner := bufio.NewScanner(envFile)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, value)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("error reading env file %s: %v", path, err)
+	}
+}
+
 func main() {
-	cfg, err := config.Load("config.toml")
+	if !isVersionFlag() {
+		loadDotEnv()
+	}
+
+	cfg, err := config.LoadAuto()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -188,7 +262,7 @@ func invokeCommander(
 	mapInfo, _ := client.MapInfo()
 	sum := col.Summary()
 
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is returned to caller
+	ctx, cancel := context.WithCancel(context.Background())
 	go func(ctx context.Context, sum *collector.Summary, info *wt.MapInfo) {
 		report, prompt, err := cmd.Advise(ctx, sum, info)
 
@@ -260,6 +334,7 @@ func (s *assistantState) reset() {
 	s.matchMode = 0
 
 	s.cmdCancel()
+	s.logger.VisibilitySummary(s.alerter.VisibilitySummary())
 	s.logger.MatchEnd()
 	s.logger = nil
 
@@ -473,12 +548,24 @@ func runAssistant(cfg config.Config, debug bool) error {
 
 	state := newAssistantState(cfg)
 
+	if state.cmd == nil && int(cfg.Notifications.MinPriority) >= analyzer.PriorityCommander {
+		const (
+			red   = "\033[31m"
+			reset = "\033[0m"
+		)
+
+		fmt.Fprintf(os.Stderr, "%sERROR: min_priority is set to %d (commander only) but no AI API key is configured — no alerts will be delivered.%s\n",
+			red, cfg.Notifications.MinPriority, reset)
+
+		return cli.Exit("", 1)
+	}
+
 	if debug {
 		debugFile, err := openDebugFile(cfg)
 		if err != nil {
 			return err
 		}
-		defer debugFile.Close()
+		defer closer.Close(debugFile)
 
 		state.client.SetDebugWriter(debugFile)
 	}

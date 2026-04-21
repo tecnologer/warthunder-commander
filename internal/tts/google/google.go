@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/tecnologer/warthunder/internal/tts/player"
+	"github.com/tecnologer/warthunder/internal/utils/closer"
 )
 
 // Speaker downloads MP3 from Google Translate TTS and plays it via an
@@ -78,7 +79,7 @@ func (g *Speaker) fetch(text, dest string) error {
 	if err != nil {
 		return fmt.Errorf("google-tts: create %s: %w", dest, err)
 	}
-	defer audioFile.Close()
+	defer closer.Close(audioFile)
 
 	if _, err := io.Copy(audioFile, resp.Body); err != nil {
 		os.Remove(dest)

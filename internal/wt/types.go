@@ -22,7 +22,7 @@ const (
 
 // String returns a human-readable name for the match type.
 func (m MatchType) String() string {
-	switch m { //nolint:exhaustive // default to Battle for unrecognised values
+	switch m {
 	case MatchTypeConquest:
 		return "Conquest"
 	case MatchTypeDomination:
@@ -67,7 +67,7 @@ const (
 
 // String returns a human-readable name for the game mode.
 func (m GameMode) String() string {
-	switch m { //nolint:exhaustive // default to Arcade for unrecognised values
+	switch m {
 	case GameModeRealistic:
 		return "Realistic"
 	case GameModeSimulator:
@@ -234,6 +234,57 @@ func Dist(a, b *MapObject) float64 {
 	dy := a.Y - b.Y
 
 	return math.Sqrt(dx*dx + dy*dy)
+}
+
+func mapDimensions(info *MapInfo) (float64, float64, bool) {
+	if info == nil {
+		return 0, 0, false
+	}
+
+	width := info.MapMax[0] - info.MapMin[0]
+	height := info.MapMax[1] - info.MapMin[1]
+
+	if width <= 0 || height <= 0 {
+		width = info.MapSizeX
+		height = info.MapSizeY
+	}
+
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+
+	return width, height, true
+}
+
+// NormDistToMeters converts a normalized distance to metres using the average map scale.
+// Returns 0 when mapInfo is nil or has no valid dimensions.
+func NormDistToMeters(dist float64, info *MapInfo) int {
+	width, height, ok := mapDimensions(info)
+	if !ok {
+		return 0
+	}
+
+	return int(math.Round(dist * (width + height) / 2.0))
+}
+
+// NormDeltaDistToMeters converts normalized deltas to a distance in metres using per-axis map scales.
+// Returns (0, false) when mapInfo is nil or has no valid dimensions.
+func NormDeltaDistToMeters(dxNorm, dyNorm float64, info *MapInfo) (int, bool) {
+	width, height, ok := mapDimensions(info)
+	if !ok {
+		return 0, false
+	}
+
+	dxMeters := dxNorm * width
+	dyMeters := dyNorm * height
+
+	return int(math.Round(math.Hypot(dxMeters, dyMeters))), true
+}
+
+// DistToMeters converts the distance between two objects to metres.
+// Returns (0, false) when mapInfo is nil or has no valid dimensions.
+func DistToMeters(a, b *MapObject, info *MapInfo) (int, bool) {
+	return NormDeltaDistToMeters(a.X-b.X, a.Y-b.Y, info)
 }
 
 // colorClose checks whether RGB values are within the given tolerance.
