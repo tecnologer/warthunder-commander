@@ -53,13 +53,32 @@ por voz.
 
 ## Instalación
 
+### Recomendado: asistente de configuración
+
+Descarga `warthunder-setup` desde la página de [Releases](../../releases) y ejecútalo:
+
+> `warthunder-commander` es un archivo de versión separado — el asistente lo descarga e instala por ti.
+
+Ejecuta el asistente y sigue las instrucciones en pantalla:
+
+```bash
+./warthunder-setup
+```
+
+El asistente realizará lo siguiente:
+
+1. Preguntará dónde instalar el binario (predeterminado: `~/.local/bin/wtcommander`).
+2. Te guiará por cada opción de configuración (idioma, motor IA/clave, motor TTS, colores, etc.).
+3. Descargará el binario `warthunder-commander` correcto para tu sistema operativo y arquitectura desde GitHub Releases.
+4. Escribirá `warthunder-commander.toml` junto al binario.
+
+### Compilación manual (desarrolladores)
+
 ```bash
 git clone https://github.com/tecnologer/warthunder
 cd warthunder
 go build -o warthunder-commander ./cmd/main.go
 ```
-
-O descarga un binario precompilado desde la página de [Releases](../../releases).
 
 ## Uso
 

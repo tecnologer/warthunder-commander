@@ -47,13 +47,32 @@ Anthropic) to deliver a one-line tactical situation report over voice.
 
 ## Installation
 
+### Recommended: setup wizard
+
+Download `warthunder-setup` from the [Releases](../../releases) page and run it:
+
+> `warthunder-commander` is a separate release asset — the wizard downloads and installs it for you.
+
+Run the wizard and follow the on-screen steps:
+
+```bash
+./warthunder-setup
+```
+
+The wizard will:
+
+1. Ask where to install the binary (default: `~/.local/bin/wtcommander`).
+2. Walk you through every config option (language, AI engine/key, TTS engine, colors, etc.).
+3. Download the correct `warthunder-commander` binary for your OS and architecture from GitHub Releases.
+4. Write `warthunder-commander.toml` next to the binary.
+
+### Manual build (developers)
+
 ```bash
 git clone https://github.com/tecnologer/warthunder
 cd warthunder
 go build -o warthunder-commander ./cmd/main.go
 ```
-
-Or download a pre-built binary from the [Releases](../../releases) page.
 
 ## Usage
 
