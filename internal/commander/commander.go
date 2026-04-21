@@ -65,11 +65,14 @@ func New(aiCfg config.AIConfig, language lang.Language, commanderInterval time.D
 	}
 
 	model := aiCfg.Model
+
 	var llm backend
+
 	if aiCfg.Engine == config.AIEngineAnthropic {
 		if model == "" {
 			model = config.DefaultAnthropicModel
 		}
+
 		llm = newAnthropicBackend(model)
 	} else {
 		if model == "" {
@@ -177,7 +180,7 @@ func (c *Commander) formattedHistory() string {
 
 	var builder strings.Builder
 
-	for i, v := range slices.Backward(history) {
+	for i, alert := range slices.Backward(history) {
 		count := len(history) - i
 
 		label := "reports"
@@ -185,7 +188,7 @@ func (c *Commander) formattedHistory() string {
 			label = "report"
 		}
 
-		_, _ = fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, v)
+		_, _ = fmt.Fprintf(&builder, "[%d %s ago] %s\n", count, label, alert)
 	}
 
 	return strings.TrimRight(builder.String(), "\n")
@@ -361,6 +364,7 @@ func (c *Commander) buildSquadSection(builder *strings.Builder, phrases lang.Phr
 		} else {
 			dx, dy := squadTrack.Displacement()
 			bearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
+
 			dir := c.lang.CompassDir(bearing)
 			if dist, ok := wt.NormDeltaDistToMeters(dx, dy, mapInfo); ok {
 				line += fmt.Sprintf(phrases.MovingFmt, dir, dist)
@@ -406,6 +410,7 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 		} else {
 			dx, dy := enemyTrack.Displacement()
 			movementBearing := math.Mod(math.Atan2(-dy, dx)*180/math.Pi+90+360, 360)
+
 			movementDir := c.lang.CompassDir(movementBearing)
 			if dist, ok := wt.NormDeltaDistToMeters(dx, dy, mapInfo); ok {
 				line += fmt.Sprintf(phrases.MovingFmt, movementDir, dist)
@@ -415,6 +420,7 @@ func (c *Commander) buildEnemiesSection(builder *strings.Builder, phrases lang.P
 			if sum.Player != nil {
 				threat = classifyFlankThreat(enemyTrack, sum.Player)
 			}
+
 			if threat != "" {
 				line += " → " + threat
 			}
@@ -466,6 +472,43 @@ func classifyFlankThreat(track collector.EnemyTrack, player *wt.MapObject) strin
 	}
 }
 
+// countFriendliesNearZone counts how many friendly units (player + allies + squad) are
+// within zoneCoverageRadius of zone.
+func countFriendliesNearZone(sum *collector.Summary, zone *wt.MapObject) int {
+	count := 0
+
+	if sum.Player != nil && wt.Dist(sum.Player, zone) <= zoneCoverageRadius {
+		count++
+	}
+
+	for i := range sum.Allies {
+		if wt.Dist(&sum.Allies[i], zone) <= zoneCoverageRadius {
+			count++
+		}
+	}
+
+	for _, sq := range sum.Squad {
+		if wt.Dist(&sq.Last, zone) <= zoneCoverageRadius {
+			count++
+		}
+	}
+
+	return count
+}
+
+// countEnemiesNearZone counts how many enemy tracks are within zoneCoverageRadius of zone.
+func countEnemiesNearZone(enemies []collector.EnemyTrack, zone *wt.MapObject) int {
+	count := 0
+
+	for _, en := range enemies {
+		if wt.Dist(&en.Last, zone) <= zoneCoverageRadius {
+			count++
+		}
+	}
+
+	return count
+}
+
 func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phrases, sum *collector.Summary, mapInfo *wt.MapInfo) {
 	if len(sum.Zones) == 0 {
 		return
@@ -485,30 +528,8 @@ func (c *Commander) buildZonesSection(builder *strings.Builder, phrases lang.Phr
 		line := fmt.Sprintf(phrases.ZoneFmt, string(rune('A'+idx)), status, gridRef(zone.X, zone.Y, mapInfo))
 		line = strings.TrimSuffix(line, "\n")
 
-		friendlies := 0
-		if sum.Player != nil && wt.Dist(sum.Player, &zone) <= zoneCoverageRadius {
-			friendlies++
-		}
-
-		for i := range sum.Allies {
-			if wt.Dist(&sum.Allies[i], &zone) <= zoneCoverageRadius {
-				friendlies++
-			}
-		}
-
-		for _, sq := range sum.Squad {
-			if wt.Dist(&sq.Last, &zone) <= zoneCoverageRadius {
-				friendlies++
-			}
-		}
-
-		enemies := 0
-
-		for _, en := range sum.Enemies {
-			if wt.Dist(&en.Last, &zone) <= zoneCoverageRadius {
-				enemies++
-			}
-		}
+		friendlies := countFriendliesNearZone(sum, &zone)
+		enemies := countEnemiesNearZone(sum.Enemies, &zone)
 
 		if friendlies > 0 || enemies > 0 {
 			line += fmt.Sprintf(" (friendlies nearby: %d, enemies nearby: %d)", friendlies, enemies)

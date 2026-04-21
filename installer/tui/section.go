@@ -143,5 +143,6 @@ func fieldParentKey(key string) string {
 	if i := strings.LastIndex(key, "."); i >= 0 {
 		return key[:i]
 	}
+
 	return ""
 }

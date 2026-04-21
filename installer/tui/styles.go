@@ -2,6 +2,7 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
+//nolint:gochecknoglobals
 var (
 	stylePrimary   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 	styleSubtle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))

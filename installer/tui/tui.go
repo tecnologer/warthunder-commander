@@ -25,7 +25,13 @@ const (
 
 	// buffer enough queued progress updates to avoid stalling download IO.
 	downloadMsgBufferSize = 128
+
+	boolTrue  = "true"
+	boolFalse = "false"
 )
+
+// configKV holds a single key/value pair for the confirm view.
+type configKV struct{ k, v string }
 
 // Model is the root Bubble Tea model for the installer wizard.
 type Model struct {
@@ -86,45 +92,7 @@ func New(sch *schema.Schema, version string) *Model {
 	configValues := map[string]string{}
 
 	for i, field := range sch.Fields {
-		textInput := textinput.New()
-		textInput.Placeholder = field.Default
-
-		if field.Default != "" {
-			textInput.SetValue(field.Default)
-		}
-
-		if field.Type == schema.FieldTypePassword {
-			textInput.EchoMode = textinput.EchoPassword
-		}
-
-		if field.Type == schema.FieldTypeBool {
-			boolValues[field.Key] = field.Default == "true"
-		}
-
-		if field.Type == schema.FieldTypeSelect {
-			for j, opt := range field.Options {
-				if opt == field.Default {
-					selectIdxes[i] = j
-
-					break
-				}
-			}
-
-			// Pre-populate so show_if conditions work from the first render.
-			if field.Default != "" {
-				configValues[field.Key] = field.Default
-			} else if len(field.Options) > 0 {
-				configValues[field.Key] = field.Options[0]
-			}
-		}
-
-		if isRGBKey(field.Key) {
-			textInput.Width = rgbInputWidth
-		} else {
-			textInput.Width = inputWidth
-		}
-
-		inputs[i] = textInput
+		initInputForField(field, i, inputs, selectIdxes, boolValues, configValues)
 	}
 
 	envVarInput := textinput.New()
@@ -145,6 +113,60 @@ func New(sch *schema.Schema, version string) *Model {
 		envVarInput:  envVarInput,
 		spinner:      newSpinner,
 		progress:     prog,
+	}
+}
+
+// initInputForField initialises the textinput and state maps for a single schema field.
+func initInputForField(
+	field schema.Field,
+	i int,
+	inputs []textinput.Model,
+	selectIdxes []int,
+	boolValues map[string]bool,
+	configValues map[string]string,
+) {
+	textInput := textinput.New()
+	textInput.Placeholder = field.Default
+
+	if field.Default != "" {
+		textInput.SetValue(field.Default)
+	}
+
+	if field.Type == schema.FieldTypePassword {
+		textInput.EchoMode = textinput.EchoPassword
+	}
+
+	if field.Type == schema.FieldTypeBool {
+		boolValues[field.Key] = field.Default == boolTrue
+	}
+
+	if field.Type == schema.FieldTypeSelect {
+		initSelectField(field, i, selectIdxes, configValues)
+	}
+
+	if isRGBKey(field.Key) {
+		textInput.Width = rgbInputWidth
+	} else {
+		textInput.Width = inputWidth
+	}
+
+	inputs[i] = textInput
+}
+
+// initSelectField seeds the select cursor and pre-populates configValues for show_if evaluation.
+func initSelectField(field schema.Field, i int, selectIdxes []int, configValues map[string]string) {
+	for j, opt := range field.Options {
+		if opt == field.Default {
+			selectIdxes[i] = j
+
+			break
+		}
+	}
+
+	if field.Default != "" {
+		configValues[field.Key] = field.Default
+	} else if len(field.Options) > 0 {
+		configValues[field.Key] = field.Options[0]
 	}
 }
 
@@ -172,14 +194,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dlWritten = msg.written
 		m.dlTotal = msg.total
 
-		next := cmdWaitDownloadMsg(m.dlMsgs)
-		if m.dlTotal > 0 {
-			cmd := m.progress.SetPercent(float64(m.dlWritten) / float64(m.dlTotal))
-
-			return m, tea.Batch(next, cmd)
-		}
-
-		return m, next
+		return m, m.progressCmd()
 	case msgDownloadDone:
 		m.dlMsgs = nil
 		m.tmpBinPath = msg.tmpPath
@@ -207,7 +222,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case progress.FrameMsg:
 		pm, cmd := m.progress.Update(msg)
-		m.progress = pm.(progress.Model)
+
+		if prog, ok := pm.(progress.Model); ok {
+			m.progress = prog
+		}
 
 		return m, cmd
 	}
@@ -216,89 +234,120 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
+	if isExitKey(msg) {
 		return m, tea.Quit
 	}
 
 	switch m.step {
 	case stepWelcome:
-		switch {
-		case msg.String() == "q":
-			return m, tea.Quit
-		case msg.Type == tea.KeyEnter:
-			m.step = stepInstallDir
-			m.installDir.Focus()
-		}
-
+		return m.handleWelcomeKey(msg)
 	case stepInstallDir:
-		switch msg.Type {
-		case tea.KeyEnter:
-			if m.installDir.Value() == "" {
-				m.installDir.SetValue(installer.DefaultInstallDir())
-			}
-
-			m.installDir.Blur()
-
-			if len(m.sections) > 0 {
-				m.step = stepConfigFields
-				m.enterFirstVisibleSection()
-			} else {
-				m.step = stepConfirm
-			}
-		default:
-			var cmd tea.Cmd
-
-			m.installDir, cmd = m.installDir.Update(msg)
-
-			return m, cmd
-		}
+		return m.handleInstallDirKey(msg)
 	case stepConfigFields:
 		return m.handleSectionKey(msg)
 	case stepEnvVarPrompt:
-		switch msg.String() {
-		case "y", "Y":
-			m.envVarInput.Reset()
-			m.envVarInput.Focus()
-			m.step = stepEnvVarValue
-		case "n", "N", "enter":
-			m.advanceEnvVar()
-			return m, nil
-		}
-
+		return m.handleEnvVarPromptKey(msg)
 	case stepEnvVarValue:
-		switch msg.Type {
-		case tea.KeyEnter:
-			if val := m.envVarInput.Value(); val != "" {
-				m.envVarValues[m.currentEnvVarName()] = val
-			}
-
-			m.advanceEnvVar()
-
-			return m, nil
-		default:
-			var cmd tea.Cmd
-
-			m.envVarInput, cmd = m.envVarInput.Update(msg)
-
-			return m, cmd
-		}
-
+		return m.handleEnvVarValueKey(msg)
 	case stepConfirm:
-		switch msg.String() {
-		case "y", "Y", "enter":
-			m.step = stepDownloading
-
-			return m, m.cmdResolveAndDownload()
-		case "n", "N", "q":
-			return m, tea.Quit
-		}
-
+		return m.handleConfirmKey(msg)
 	case stepDownloading, stepInstalling:
-		if msg.String() == "q" {
-			return m, tea.Quit
-		}
-
+		return m.handleDownloadingKey(msg)
 	case stepDone, stepError:
+		return m, tea.Quit
+	}
+
+	return m, nil
+}
+
+// isExitKey returns true for the universal quit key combinations.
+func isExitKey(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC
+}
+
+func (m *Model) handleWelcomeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.String() == "q":
+		return m, tea.Quit
+	case msg.Type == tea.KeyEnter:
+		m.step = stepInstallDir
+		m.installDir.Focus()
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleInstallDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.KeyEnter {
+		var cmd tea.Cmd
+
+		m.installDir, cmd = m.installDir.Update(msg)
+
+		return m, cmd
+	}
+
+	if m.installDir.Value() == "" {
+		m.installDir.SetValue(installer.DefaultInstallDir())
+	}
+
+	m.installDir.Blur()
+
+	if len(m.sections) > 0 {
+		m.step = stepConfigFields
+		m.enterFirstVisibleSection()
+	} else {
+		m.step = stepConfirm
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleEnvVarPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.envVarInput.Reset()
+		m.envVarInput.Focus()
+		m.step = stepEnvVarValue
+	case "n", "N", "enter":
+		m.advanceEnvVar()
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleEnvVarValueKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.KeyEnter {
+		var cmd tea.Cmd
+
+		m.envVarInput, cmd = m.envVarInput.Update(msg)
+
+		return m, cmd
+	}
+
+	if val := m.envVarInput.Value(); val != "" {
+		m.envVarValues[m.currentEnvVarName()] = val
+	}
+
+	m.advanceEnvVar()
+
+	return m, nil
+}
+
+func (m *Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		m.step = stepDownloading
+
+		return m, m.cmdResolveAndDownload()
+	case "n", "N", "q":
+		return m, tea.Quit
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleDownloadingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "q" {
 		return m, tea.Quit
 	}
 
@@ -312,132 +361,164 @@ func (m *Model) handleSectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyTab:
-		if group.kind == kindRGB && m.subFocus < 2 {
-			m.subFocus++
-			m.refocusSection()
-
-			return m, nil
-		}
-
-		m.subFocus = 0
-
-		return m, m.moveToNextField()
+		return m.handleSectionTab(group)
 	case tea.KeyShiftTab:
-		if group.kind == kindRGB && m.subFocus > 0 {
-			m.subFocus--
-			m.refocusSection()
-
-			return m, nil
-		}
-
-		m.subFocus = 0
-		m.moveToPrevField()
-
-		return m, nil
+		return m.handleSectionShiftTab(group)
 	case tea.KeyUp:
-		if group.kind == kindSingle {
-			idx := group.indices[0]
-
-			f := m.schema.Fields[idx]
-			if f.Type == schema.FieldTypeSelect {
-				if m.selectIdxes[idx] > 0 {
-					m.selectIdxes[idx]--
-					m.configValues[f.Key] = f.Options[m.selectIdxes[idx]]
-				}
-
-				return m, nil
-			}
-		}
-
-		m.subFocus = 0
-		m.moveToPrevField()
-
-		return m, nil
+		return m.handleSectionUp(group)
 	case tea.KeyDown:
-		if group.kind == kindSingle {
-			idx := group.indices[0]
-
-			field := m.schema.Fields[idx]
-			if field.Type == schema.FieldTypeSelect {
-				if m.selectIdxes[idx] < len(field.Options)-1 {
-					m.selectIdxes[idx]++
-					m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
-				}
-
-				return m, nil
-			}
-		}
-
-		m.subFocus = 0
-
-		return m, m.moveToNextField()
+		return m.handleSectionDown(group)
 	case tea.KeyLeft:
-		if group.kind == kindSingle {
-			idx := group.indices[0]
-
-			field := m.schema.Fields[idx]
-			if field.Type == schema.FieldTypeSelect && m.selectIdxes[idx] > 0 {
-				m.selectIdxes[idx]--
-				m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
-			}
-		}
-
-		return m, nil
+		return m.handleSectionLeft(group)
 	case tea.KeyRight:
-		if group.kind == kindSingle {
-			idx := group.indices[0]
-
-			f := m.schema.Fields[idx]
-			if f.Type == schema.FieldTypeSelect && m.selectIdxes[idx] < len(f.Options)-1 {
-				m.selectIdxes[idx]++
-				m.configValues[f.Key] = f.Options[m.selectIdxes[idx]]
-			}
-		}
-
-		return m, nil
+		return m.handleSectionRight(group)
 	case tea.KeySpace:
-		if group.kind == kindSingle {
-			idx := group.indices[0]
-
-			field := m.schema.Fields[idx]
-			if field.Type == schema.FieldTypeBool {
-				m.boolValues[field.Key] = !m.boolValues[field.Key]
-
-				return m, nil
-			}
-
-			if field.Type == schema.FieldTypeText || field.Type == schema.FieldTypePassword {
-				var cmd tea.Cmd
-
-				m.inputs[idx], cmd = m.inputs[idx].Update(msg)
-
-				return m, cmd
-			}
-		}
+		return m.handleSectionSpace(group, msg)
 	case tea.KeyEnter:
 		return m, m.handleEnter()
 	default:
-		switch group.kind {
-		case kindSingle:
-			idx := group.indices[0]
+		return m.handleSectionDefault(group, msg)
+	}
+}
 
-			f := m.schema.Fields[idx]
-			if f.Type == schema.FieldTypeText || f.Type == schema.FieldTypePassword {
-				var cmd tea.Cmd
+func (m *Model) handleSectionTab(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindRGB && m.subFocus < 2 {
+		m.subFocus++
+		m.refocusSection()
 
-				m.inputs[idx], cmd = m.inputs[idx].Update(msg)
+		return m, nil
+	}
 
-				return m, cmd
-			}
-		case kindRGB:
-			idx := group.indices[m.subFocus]
+	m.subFocus = 0
 
+	return m, m.moveToNextField()
+}
+
+func (m *Model) handleSectionShiftTab(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindRGB && m.subFocus > 0 {
+		m.subFocus--
+		m.refocusSection()
+
+		return m, nil
+	}
+
+	m.subFocus = 0
+	m.moveToPrevField()
+
+	return m, nil
+}
+
+func (m *Model) handleSectionUp(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindSingle {
+		idx := group.indices[0]
+		f := m.schema.Fields[idx]
+
+		if f.Type == schema.FieldTypeSelect && m.selectIdxes[idx] > 0 {
+			m.selectIdxes[idx]--
+			m.configValues[f.Key] = f.Options[m.selectIdxes[idx]]
+
+			return m, nil
+		}
+	}
+
+	m.subFocus = 0
+	m.moveToPrevField()
+
+	return m, nil
+}
+
+func (m *Model) handleSectionDown(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindSingle {
+		idx := group.indices[0]
+		field := m.schema.Fields[idx]
+
+		if field.Type == schema.FieldTypeSelect && m.selectIdxes[idx] < len(field.Options)-1 {
+			m.selectIdxes[idx]++
+			m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
+
+			return m, nil
+		}
+	}
+
+	m.subFocus = 0
+
+	return m, m.moveToNextField()
+}
+
+func (m *Model) handleSectionLeft(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindSingle {
+		idx := group.indices[0]
+		field := m.schema.Fields[idx]
+
+		if field.Type == schema.FieldTypeSelect && m.selectIdxes[idx] > 0 {
+			m.selectIdxes[idx]--
+			m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
+		}
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleSectionRight(group fieldGroup) (tea.Model, tea.Cmd) {
+	if group.kind == kindSingle {
+		idx := group.indices[0]
+		f := m.schema.Fields[idx]
+
+		if f.Type == schema.FieldTypeSelect && m.selectIdxes[idx] < len(f.Options)-1 {
+			m.selectIdxes[idx]++
+			m.configValues[f.Key] = f.Options[m.selectIdxes[idx]]
+		}
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleSectionSpace(group fieldGroup, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if group.kind != kindSingle {
+		return m, nil
+	}
+
+	idx := group.indices[0]
+	field := m.schema.Fields[idx]
+
+	if field.Type == schema.FieldTypeBool {
+		m.boolValues[field.Key] = !m.boolValues[field.Key]
+
+		return m, nil
+	}
+
+	if field.Type == schema.FieldTypeText || field.Type == schema.FieldTypePassword {
+		var cmd tea.Cmd
+
+		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
+
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m *Model) handleSectionDefault(group fieldGroup, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch group.kind {
+	case kindSingle:
+		idx := group.indices[0]
+		f := m.schema.Fields[idx]
+
+		if f.Type == schema.FieldTypeText || f.Type == schema.FieldTypePassword {
 			var cmd tea.Cmd
 
 			m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 
 			return m, cmd
 		}
+	case kindRGB:
+		idx := group.indices[m.subFocus]
+
+		var cmd tea.Cmd
+
+		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
+
+		return m, cmd
 	}
 
 	return m, nil
@@ -445,76 +526,79 @@ func (m *Model) handleSectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleEnter confirms the focused field and moves forward within the section or to the next section.
 func (m *Model) handleEnter() tea.Cmd {
-	var (
-		sec   = m.sections[m.sectionIdx]
-		group = sec.groups[m.fieldIdx]
-	)
+	group := m.sections[m.sectionIdx].groups[m.fieldIdx]
 
 	switch group.kind {
 	case kindRGB:
-		var (
-			idx   = group.indices[m.subFocus]
-			field = m.schema.Fields[idx]
-			val   = m.inputs[idx].Value()
-		)
+		return m.handleEnterRGB(group)
+	case kindSingle:
+		return m.handleEnterSingle(group)
+	}
+
+	return nil
+}
+
+func (m *Model) handleEnterRGB(group fieldGroup) tea.Cmd {
+	idx := group.indices[m.subFocus]
+	field := m.schema.Fields[idx]
+	val := m.inputs[idx].Value()
+
+	if val == "" {
+		val = field.Default
+	}
+
+	m.configValues[field.Key] = val
+
+	if m.subFocus < 2 {
+		m.subFocus++
+		m.refocusSection()
+
+		return nil
+	}
+
+	for _, i := range group.indices {
+		field := m.schema.Fields[i]
+		val := m.inputs[i].Value()
 
 		if val == "" {
 			val = field.Default
 		}
 
 		m.configValues[field.Key] = val
-
-		if m.subFocus < 2 {
-			m.subFocus++
-			m.refocusSection()
-
-			return nil
-		}
-		// Confirmed last sub-input; flush all three and advance.
-		for _, i := range group.indices {
-			field := m.schema.Fields[i]
-
-			v := m.inputs[i].Value()
-			if v == "" {
-				v = field.Default
-			}
-
-			m.configValues[field.Key] = v
-		}
-
-		m.subFocus = 0
-
-		return m.moveToNextField()
-	case kindSingle:
-		idx := group.indices[0]
-		field := m.schema.Fields[idx]
-
-		switch field.Type {
-		case schema.FieldTypeBool:
-			if m.boolValues[field.Key] {
-				m.configValues[field.Key] = "true"
-			} else {
-				m.configValues[field.Key] = "false"
-			}
-		case schema.FieldTypeSelect:
-			m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
-		default:
-			val := m.inputs[idx].Value()
-			if val == "" {
-				val = field.Default
-			}
-
-			if field.Required && val == "" {
-				return nil
-			}
-
-			m.configValues[field.Key] = val
-		}
-
-		return m.moveToNextField()
 	}
 
-	return nil
+	m.subFocus = 0
+
+	return m.moveToNextField()
+}
+
+func (m *Model) handleEnterSingle(group fieldGroup) tea.Cmd {
+	idx := group.indices[0]
+	field := m.schema.Fields[idx]
+
+	switch field.Type {
+	case schema.FieldTypeBool:
+		if m.boolValues[field.Key] {
+			m.configValues[field.Key] = boolTrue
+		} else {
+			m.configValues[field.Key] = boolFalse
+		}
+	case schema.FieldTypeSelect:
+		m.configValues[field.Key] = field.Options[m.selectIdxes[idx]]
+	default:
+		val := m.inputs[idx].Value()
+		if val == "" {
+			val = field.Default
+		}
+
+		if field.Required && val == "" {
+			return nil
+		}
+
+		m.configValues[field.Key] = val
+	}
+
+	return m.moveToNextField()
 }
 
 func (m *Model) moveToNextField() tea.Cmd {
@@ -550,11 +634,11 @@ func (m *Model) moveToPrevField() {
 func (m *Model) advanceSection() tea.Cmd {
 	for key, value := range m.boolValues {
 		if value {
-			m.configValues[key] = "true"
+			m.configValues[key] = boolTrue
 			continue
 		}
 
-		m.configValues[key] = "false"
+		m.configValues[key] = boolFalse
 	}
 
 	for i := m.sectionIdx + 1; i < len(m.sections); i++ {
@@ -574,7 +658,7 @@ func (m *Model) advanceSection() tea.Cmd {
 
 func (m *Model) enterFirstVisibleSection() {
 	for i := range m.sections {
-		if !m.isSectionVisible(i) {
+		if m.isSectionVisible(i) {
 			m.sectionIdx = i
 			m.fieldIdx = 0
 			m.subFocus = 0
@@ -616,19 +700,19 @@ func (m *Model) refocusSection() {
 				continue
 			}
 
-			if i == m.fieldIdx {
-				if group.kind == kindRGB {
-					if subIdx == m.subFocus {
-						m.inputs[schIdx].Focus()
-					} else {
-						m.inputs[schIdx].Blur()
-					}
-				} else {
-					m.inputs[schIdx].Focus()
-				}
-			} else {
+			if i != m.fieldIdx {
 				m.inputs[schIdx].Blur()
+
+				continue
 			}
+
+			if group.kind == kindRGB && subIdx != m.subFocus {
+				m.inputs[schIdx].Blur()
+
+				continue
+			}
+
+			m.inputs[schIdx].Focus()
 		}
 	}
 }
@@ -774,6 +858,16 @@ func (m *Model) cmdResolveAndDownload() tea.Cmd {
 	return cmdWaitDownloadMsg(msgs)
 }
 
+func (m *Model) progressCmd() tea.Cmd {
+	next := cmdWaitDownloadMsg(m.dlMsgs)
+
+	if m.dlTotal > 0 {
+		return tea.Batch(next, m.progress.SetPercent(float64(m.dlWritten)/float64(m.dlTotal)))
+	}
+
+	return next
+}
+
 func cmdWaitDownloadMsg(msgs <-chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		if msgs == nil {
@@ -823,6 +917,15 @@ func (m *Model) cmdInstall() tea.Cmd {
 // ── View ─────────────────────────────────────────────────────────────────────
 
 func (m *Model) View() string {
+	if v := m.viewSetupSteps(); v != "" {
+		return v
+	}
+
+	return m.viewInstallSteps()
+}
+
+// viewSetupSteps renders the welcome-through-envvar screens; returns "" when not applicable.
+func (m *Model) viewSetupSteps() string {
 	switch m.step {
 	case stepWelcome:
 		return m.viewWelcome()
@@ -834,6 +937,14 @@ func (m *Model) View() string {
 		return m.viewEnvVarPrompt()
 	case stepEnvVarValue:
 		return m.viewEnvVarValue()
+	default:
+		return ""
+	}
+}
+
+// viewInstallSteps renders the confirm-through-done/error screens.
+func (m *Model) viewInstallSteps() string {
+	switch m.step {
 	case stepConfirm:
 		return m.viewConfirm()
 	case stepDownloading:
@@ -844,13 +955,14 @@ func (m *Model) View() string {
 		return m.viewDone()
 	case stepError:
 		return m.viewError()
+	default:
+		return ""
 	}
-	return ""
 }
 
 func (m *Model) viewWelcome() string {
 	title := stylePrimary.Render(fmt.Sprintf("  %s Installer", m.schema.AppName))
-	versionLine := styleSubtle.Render(fmt.Sprintf("  version %s", m.version))
+	versionLine := styleSubtle.Render("  version " + m.version)
 	body := styleBox.Render(
 		title + "\n" + versionLine + "\n\n" +
 			"This wizard will guide you through:\n\n" +
@@ -859,6 +971,7 @@ func (m *Model) viewWelcome() string {
 			"  • Downloading and installing the latest binary\n\n" +
 			styleSubtle.Render("Press Enter to continue  •  q to quit"),
 	)
+
 	return "\n" + body + "\n"
 }
 
@@ -909,6 +1022,7 @@ func (m *Model) renderFieldGroup(g fieldGroup, focused bool) string {
 	if g.kind == kindRGB {
 		return m.renderRGBGroup(g, focused)
 	}
+
 	return m.renderSingleGroup(g, focused)
 }
 
@@ -946,6 +1060,7 @@ func (m *Model) renderSingleGroup(g fieldGroup, focused bool) string {
 		if m.boolValues[field.Key] {
 			check = styleSuccess.Render("[✓]")
 		}
+
 		return cursor + check + " " + field.Label + descLine
 	case schema.FieldTypeSelect:
 		return cursor + label + m.renderSelect(idx, field, focused) + descLine
@@ -989,19 +1104,46 @@ func selectLabel(f schema.Field, sel int) string {
 	return f.Options[sel]
 }
 
-func (m *Model) renderRGBGroup(g fieldGroup, focused bool) string {
+func (m *Model) renderRGBGroup(group fieldGroup, focused bool) string {
 	cursor := "  "
 	if focused {
 		cursor = stylePrimary.Render("▶") + " "
 	}
 
-	raw := g.label + ":"
+	raw := group.label + ":"
 	raw += strings.Repeat(" ", max(0, rgbColWidth-len(raw)))
 
-	rVal, gVal, bVal := 0, 0, 0
-	hasValue := false
+	rVal, gVal, bVal, hasValue := m.computeRGBValues(group)
 
-	for _, schIdx := range g.indices {
+	labelStyle := styleDimLabel
+
+	if hasValue {
+		hex := fmt.Sprintf("#%02X%02X%02X", rVal, gVal, bVal)
+		labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(hex))
+	}
+
+	label := labelStyle.Render(raw)
+
+	parts := make([]string, 0, len(group.indices))
+
+	for _, schIdx := range group.indices {
+		f := m.schema.Fields[schIdx]
+		letter := strings.ToUpper(f.Key[strings.LastIndex(f.Key, ".")+1:])
+		lbl := styleDimLabel.Render(letter + ":")
+
+		parts = append(parts, lbl+m.inputs[schIdx].View())
+	}
+
+	return cursor + label + strings.Join(parts, "  ")
+}
+
+// computeRGBValues extracts the clamped R/G/B integers and hasValue flag from an RGB group.
+func (m *Model) computeRGBValues(group fieldGroup) (int, int, int, bool) {
+	var rVal, gVal, bVal int
+
+	var hasValue bool
+
+	for _, schIdx := range group.indices {
 		field := m.schema.Fields[schIdx]
 		cur := m.inputs[schIdx].Value()
 
@@ -1031,34 +1173,19 @@ func (m *Model) renderRGBGroup(g fieldGroup, focused bool) string {
 		}
 	}
 
-	labelStyle := styleDimLabel
-
-	if hasValue {
-		hex := fmt.Sprintf("#%02X%02X%02X", rVal, gVal, bVal)
-		labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(hex))
-	}
-
-	label := labelStyle.Render(raw)
-
-	var parts []string
-
-	for _, schIdx := range g.indices {
-		f := m.schema.Fields[schIdx]
-		letter := strings.ToUpper(f.Key[strings.LastIndex(f.Key, ".")+1:])
-		lbl := styleDimLabel.Render(letter + ":")
-
-		parts = append(parts, lbl+m.inputs[schIdx].View())
-	}
-
-	return cursor + label + strings.Join(parts, "  ")
+	return rVal, gVal, bVal, hasValue
 }
 
 func (m *Model) viewEnvVarPrompt() string {
 	name := m.currentEnvVarName()
 	pos := fmt.Sprintf("%d of %d", m.envVarIndex+1, len(m.envVarFieldIndices))
+	body := styleSubtle.Render(pos) +
+		"\n\nDo you want to set the value for " + stylePrimary.Render(name) +
+		"?\nThe value will be written to a " + stylePrimary.Render(".env") + " file beside the binary."
+
 	return m.viewStep(
 		"Set Environment Variable",
-		styleSubtle.Render(pos)+"\n\nDo you want to set the value for "+stylePrimary.Render(name)+"?\nThe value will be written to a "+stylePrimary.Render(".env")+" file beside the binary.",
+		body,
 		styleSubtle.Render("y = yes  •  n / Enter = skip  •  Esc to cancel"),
 		"",
 	)
@@ -1076,66 +1203,77 @@ func (m *Model) viewEnvVarValue() string {
 }
 
 func (m *Model) viewConfirm() string {
-	var lines []string
-
-	lines = append(lines,
+	lines := []string{
 		styleBold.Render("Review your settings:"),
 		"",
 		styleDimLabel.Render("Install directory:"),
-		"  "+m.installDir.Value(),
-	)
+		"  " + m.installDir.Value(),
+	}
 
 	if len(m.configValues) > 0 {
-		type kv struct{ k, v string }
-		var kvs []kv
-
-		for k, v := range m.configValues {
-			kvs = append(kvs, kv{k, v})
-		}
-
-		sort.Slice(kvs, func(i, j int) bool { return kvs[i].k < kvs[j].k })
-
-		prevSection := ""
-
-		for _, pair := range kvs {
-			secName := sectionDisplayName(topLevelKey(pair.k))
-
-			if secName != prevSection {
-				lines = append(lines, "", styleDimLabel.Render(secName+":"))
-				prevSection = secName
-			}
-
-			display := pair.v
-
-			for _, f := range m.schema.Fields {
-				if f.Key == pair.k && f.Type == schema.FieldTypePassword {
-					display = strings.Repeat("•", len(pair.v))
-				}
-			}
-
-			lines = append(lines, fmt.Sprintf("  %s = %s", styleDimLabel.Render(pair.k), display))
-		}
+		lines = append(lines, m.renderConfirmConfigValues()...)
 	}
 
 	if len(m.envVarValues) > 0 {
-		lines = append(lines, "", styleDimLabel.Render("Environment variables (.env):"))
-		names := make([]string, 0, len(m.envVarValues))
-
-		for k := range m.envVarValues {
-			names = append(names, k)
-		}
-
-		sort.Strings(names)
-
-		for _, name := range names {
-			lines = append(lines, fmt.Sprintf("  %s = %s", styleDimLabel.Render(name), strings.Repeat("•", 8)))
-		}
+		lines = append(lines, m.renderConfirmEnvVars()...)
 	}
 
 	lines = append(lines, "", styleSubtle.Render("Press Enter or y to install  •  n/q to cancel"))
 	body := styleBox.Render(strings.Join(lines, "\n"))
 
 	return "\n" + styleStepTitle.Render("Confirm Installation") + "\n" + body + "\n"
+}
+
+func (m *Model) renderConfirmConfigValues() []string {
+	kvs := make([]configKV, 0, len(m.configValues))
+
+	for k, v := range m.configValues {
+		kvs = append(kvs, configKV{k, v})
+	}
+
+	sort.Slice(kvs, func(i, j int) bool { return kvs[i].k < kvs[j].k })
+
+	lines := []string{""}
+	prevSection := ""
+
+	for _, pair := range kvs {
+		secName := sectionDisplayName(topLevelKey(pair.k))
+
+		if secName != prevSection {
+			lines = append(lines, styleDimLabel.Render(secName+":"))
+			prevSection = secName
+		}
+
+		display := pair.v
+
+		for _, f := range m.schema.Fields {
+			if f.Key == pair.k && f.Type == schema.FieldTypePassword {
+				display = strings.Repeat("•", len(pair.v))
+			}
+		}
+
+		lines = append(lines, fmt.Sprintf("  %s = %s", styleDimLabel.Render(pair.k), display))
+	}
+
+	return lines
+}
+
+func (m *Model) renderConfirmEnvVars() []string {
+	names := make([]string, 0, len(m.envVarValues))
+	for k := range m.envVarValues {
+		names = append(names, k)
+	}
+
+	sort.Strings(names)
+
+	lines := make([]string, 0, 2+len(names))
+	lines = append(lines, "", styleDimLabel.Render("Environment variables (.env):"))
+
+	for _, name := range names {
+		lines = append(lines, fmt.Sprintf("  %s = %s", styleDimLabel.Render(name), strings.Repeat("•", 8)))
+	}
+
+	return lines
 }
 
 func (m *Model) viewDownloading() string {

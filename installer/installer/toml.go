@@ -104,38 +104,54 @@ func tomlValue(value string) string {
 }
 
 func quoteTOMLBasicString(v string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range v {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\b':
-			b.WriteString(`\b`)
-		case '\t':
-			b.WriteString(`\t`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\f':
-			b.WriteString(`\f`)
-		case '\r':
-			b.WriteString(`\r`)
-		default:
-			if r <= 0x1F || r == 0x7F {
-				if r <= 0xFFFF {
-					fmt.Fprintf(&b, `\u%04X`, r)
-				} else {
-					fmt.Fprintf(&b, `\U%08X`, r)
-				}
-				continue
-			}
-			b.WriteRune(r)
+	var builder strings.Builder
+
+	builder.WriteByte('"')
+
+	for _, char := range v {
+		writeEscapedRune(&builder, char)
+	}
+
+	builder.WriteByte('"')
+
+	return builder.String()
+}
+
+func writeEscapedRune(builder *strings.Builder, char rune) {
+	switch char {
+	case '\\':
+		builder.WriteString(`\\`)
+	case '"':
+		builder.WriteString(`\"`)
+	case '\b':
+		builder.WriteString(`\b`)
+	case '\t':
+		builder.WriteString(`\t`)
+	case '\n':
+		builder.WriteString(`\n`)
+	case '\f':
+		builder.WriteString(`\f`)
+	case '\r':
+		builder.WriteString(`\r`)
+	default:
+		if isControlChar(char) {
+			builder.WriteString(controlCharEscape(char))
+		} else {
+			builder.WriteRune(char)
 		}
 	}
-	b.WriteByte('"')
-	return b.String()
+}
+
+func isControlChar(char rune) bool {
+	return char <= 0x1F || char == 0x7F
+}
+
+func controlCharEscape(char rune) string {
+	if char <= 0xFFFF {
+		return fmt.Sprintf(`\u%04X`, char)
+	}
+
+	return fmt.Sprintf(`\U%08X`, char)
 }
 func isNumeric(value string) bool {
 	if value == "" {

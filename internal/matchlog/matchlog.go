@@ -80,18 +80,18 @@ func (l *Logger) VisibilitySummary(entries []analyzer.VisibilityEntry) {
 
 	l.writef("=== ENEMY VISIBILITY SUMMARY ===\n")
 
-	for _, e := range entries {
-		close := ""
-		if e.WasClose {
-			close = " [close/flank]"
+	for _, entry := range entries {
+		closeTag := ""
+		if entry.WasClose {
+			closeTag = " [close/flank]"
 		}
 
 		l.writef("  %-16s  first=%s  last=%s  duration=%s%s\n",
-			e.Icon,
-			e.FirstSeen.Format("15:04:05"),
-			e.LastSeen.Format("15:04:05"),
-			e.Duration().Round(time.Second),
-			close,
+			entry.Icon,
+			entry.FirstSeen.Format("15:04:05"),
+			entry.LastSeen.Format("15:04:05"),
+			entry.Duration().Round(time.Second),
+			closeTag,
 		)
 	}
 }

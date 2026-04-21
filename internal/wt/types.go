@@ -22,7 +22,7 @@ const (
 
 // String returns a human-readable name for the match type.
 func (m MatchType) String() string {
-	switch m { //nolint:exhaustive // default to Battle for unrecognised values
+	switch m {
 	case MatchTypeConquest:
 		return "Conquest"
 	case MatchTypeDomination:
@@ -67,7 +67,7 @@ const (
 
 // String returns a human-readable name for the game mode.
 func (m GameMode) String() string {
-	switch m { //nolint:exhaustive // default to Arcade for unrecognised values
+	switch m {
 	case GameModeRealistic:
 		return "Realistic"
 	case GameModeSimulator:

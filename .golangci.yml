@@ -16,6 +16,15 @@ linters:
     - embeddedstructfieldcheck # Disabled during v2 conversion - new linting errors
     - wsl                      # Deprecated and replaced with wsl_v5 since v2.2.0
   settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    ireturn:
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - github.com/charmbracelet/bubbletea
     dupl:
       threshold: 1000
     forbidigo:

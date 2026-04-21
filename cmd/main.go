@@ -44,25 +44,28 @@ func isVersionFlag() bool {
 	return false
 }
 
+// findDotEnvFile searches candidate directories for a .env file and returns the
+// first one found, along with its path. Returns (nil, "") if none exists.
+func findDotEnvFile() (*os.File, string) {
+	for _, dir := range config.CandidateDirs() {
+		p := filepath.Join(dir, ".env")
+
+		f, err := os.Open(p)
+		if err == nil {
+			return f, p
+		}
+	}
+
+	return nil, ""
+}
+
 // loadDotEnv looks for a .env file next to the running binary and sets any
 // KEY=VALUE pairs found there as environment variables (skipping keys already set).
 // It tries two candidate directories: the resolved executable path (via
 // os.Executable / /proc/self/exe) and the path as invoked (os.Args[0]), which
 // preserves symlinks so the .env placed beside a symlink is also found.
 func loadDotEnv() {
-	dirs := config.CandidateDirs()
-
-	var envFile *os.File
-	var path string
-	for _, dir := range dirs {
-		p := filepath.Join(dir, ".env")
-		f, err := os.Open(p)
-		if err == nil {
-			envFile = f
-			path = p
-			break
-		}
-	}
+	envFile, path := findDotEnvFile()
 	if envFile == nil {
 		return
 	}
@@ -89,9 +92,6 @@ func loadDotEnv() {
 		if os.Getenv(key) == "" {
 			_ = os.Setenv(key, value)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("error reading env file %s: %v", path, err)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -262,7 +262,7 @@ func invokeCommander(
 	mapInfo, _ := client.MapInfo()
 	sum := col.Summary()
 
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is returned to caller
+	ctx, cancel := context.WithCancel(context.Background())
 	go func(ctx context.Context, sum *collector.Summary, info *wt.MapInfo) {
 		report, prompt, err := cmd.Advise(ctx, sum, info)
 
@@ -549,10 +549,14 @@ func runAssistant(cfg config.Config, debug bool) error {
 	state := newAssistantState(cfg)
 
 	if state.cmd == nil && int(cfg.Notifications.MinPriority) >= analyzer.PriorityCommander {
-		const red = "\033[31m"
-		const reset = "\033[0m"
+		const (
+			red   = "\033[31m"
+			reset = "\033[0m"
+		)
+
 		fmt.Fprintf(os.Stderr, "%sERROR: min_priority is set to %d (commander only) but no AI API key is configured — no alerts will be delivered.%s\n",
 			red, cfg.Notifications.MinPriority, reset)
+
 		return cli.Exit("", 1)
 	}
 
